@@ -1,7 +1,18 @@
 #include "server.h"
+#include <asio/io_context.hpp>
+#include <exception>
+#include <iostream>
 
 int main() {
-    auto server = std::make_shared<MyServer>();
-    server->start_server();
-    return 0;
+  try {
+    asio::io_context io_context;
+    Server server(io_context);
+
+    io_context.run();
+
+  } catch (std::exception &e) {
+    std::cerr << e.what() << std::endl;
+  }
+
+  return 0;
 }

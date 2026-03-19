@@ -1,50 +1,38 @@
-#include "server.h"
-
-#include <cerrno>
-#include <sys/epoll.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
-#include <err.h>
-
+#include <asio/awaitable.hpp>
+#include <asio/co_spawn.hpp>
+#include <asio/detached.hpp>
+#include <asio/ip/tcp.hpp>
+#include <asio/redirect_error.hpp>
+#include <asio/use_awaitable.hpp>
+#include <iostream>
 #include <memory>
 
-#include "channel.h" 
+#include "channel.h"
+#include "error.h"
+#include "server.h"
 
-MyServer::MyServer() = default;
-void MyServer::start_server() {
-    int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (listen_fd == -1) {
-        return;
+using namespace asio::ip;
+Server::Server(asio::io_context &context)
+    : io_context_(context),
+      acceptor_(context, tcp::endpoint(tcp::v4(), SVR_PORT)) {
+  asio::co_spawn(io_context_, accept_loop(), asio::detached);
+}
+
+asio::awaitable<void> Server::accept_loop() {
+  while (true) {
+    auto chl = std::make_shared<Channel>(io_context_);
+
+    std::error_code ec;
+    co_await acceptor_.async_accept(
+        chl->getSocket(), asio::redirect_error(asio::use_awaitable, ec));
+
+    if (ec) {
+      log("%s\n", ec.message());
+      continue;
     }
-    Channel* lsn_chl = register_channel<ListenChannel>(listen_fd, shared_from_this());
-
-    epfd = epoll_create(FDSIZE);
-    if(epfd == -1)
-        err(errno, "epoll create");
-    struct epoll_event ep_event;
-    ep_event.events = EPOLLET | EPOLLIN;
-    ep_event.data.ptr = lsn_chl;
-    epoll_ctl(epfd, EPOLL_CTL_ADD, lsn_chl->getfd(), &ep_event);
-
-    struct sockaddr_in sock_addr;
-    sock_addr.sin_port = htons(SVR_PORT);
-    sock_addr.sin_family = AF_INET;
-    sock_addr.sin_addr.s_addr = INADDR_ANY;
-
-    if(bind(lsn_chl->getfd(), (sockaddr *)&sock_addr, sizeof(sock_addr)) == -1)
-        err(errno, "bind");
-    listen(lsn_chl->getfd(), SOMAXCONN);
-
-    while(1) {
-        struct epoll_event events[20];
-        int nfds = epoll_wait(epfd, events, 20, -1);
-        if(nfds == -1)
-            break;
-        for(int i = 0; i < nfds; i ++) {
-            static_cast<Channel*>(events[i].data.ptr)->handle_event();
-        }
-    }
-
+    std::cout << "accepted connection" << std::endl;
+    asio::co_spawn(
+        io_context_, [chl]() -> asio::awaitable<void> { co_await chl->run(); },
+        asio::detached);
+  }
 }

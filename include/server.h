@@ -1,19 +1,19 @@
 #pragma once
+#include <asio/awaitable.hpp>
+#include <asio/io_context.hpp>
+#include <asio/ip/tcp.hpp>
 #include <memory>
-#include <vector>
 
 class Channel;
 
-class MyServer : public std::enable_shared_from_this<MyServer> {
-private: 
-    #define FDSIZE 1024
-    #define SVR_PORT 7777
+class Server : public std::enable_shared_from_this<Server> {
+private:
+  static constexpr int SVR_PORT = 7777;
+  asio::ip::tcp::acceptor acceptor_;
+  asio::io_context &io_context_;
+  asio::awaitable<void> accept_loop();
 
-    int epfd{-1};    
 public:
-    MyServer();
-    ~MyServer();
-    std::vector<std::unique_ptr<Channel> > channels;
-    void start_server();
-    int get_epfd() { return epfd; }
+  Server(asio::io_context &context);
+  ~Server() = default;
 };
