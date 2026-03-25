@@ -1,6 +1,7 @@
 #include "server.h"
 #include <asio/io_context.hpp>
 #include <exception>
+#include <httplib.h>
 #include <iostream>
 
 int main() {
