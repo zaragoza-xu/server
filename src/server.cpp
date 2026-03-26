@@ -4,6 +4,7 @@
 #include <asio/ip/tcp.hpp>
 #include <asio/redirect_error.hpp>
 #include <asio/use_awaitable.hpp>
+#include <cstddef>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -96,11 +97,11 @@ bool Server::user_exists(const std::string &uid) const {
   return users.count(uid) > 0;
 }
 
-std::shared_ptr<Room> Server::create_room(const std::string &room_name,
+std::shared_ptr<Room> Server::create_room(const std::string &roomName, const size_t maximumPeople,
                                           std::shared_ptr<User> user) {
   std::lock_guard<std::mutex> lock(roomsMutex);
   int room_id = nextRoomId++;
-  auto room = std::make_shared<Room>(room_id, room_name, user);
+  auto room = std::make_shared<Room>(room_id, roomName, maximumPeople, user);
   rooms[room_id] = room;
   user->set_room_id(room_id);
   return room;
@@ -118,7 +119,7 @@ bool Server::join_room(std::shared_ptr<Room> room, std::shared_ptr<User> user) {
   std::lock_guard<std::mutex> lock(roomsMutex);
 
   if (user->is_in_room()) {
-    leave_room(user->get_room_id(), user->get_uid());
+    return false;
   }
 
   bool success = room->add_member(user);
@@ -134,17 +135,18 @@ bool Server::leave_room(int room_id, const std::string &uid) {
     return false;
   }
 
-  auto memberIt = it->second->get_members().find(uid);
-  std::shared_ptr<User> member =
-      memberIt != it->second->get_members().end() ? memberIt->second : nullptr;
+  auto room = it->second;
 
-  it->second->remove_member(uid);
-  if (member) {
-    member->set_room_id(-1);
-  }
+  auto memberIt = room->get_members().find(uid);
+  if(memberIt == room->get_members().end())
+    return false;
+  std::shared_ptr<User> member = memberIt->second;
+
+  room->remove_member(uid);
+  member->set_room_id(-1);
 
   // Delete empty rooms
-  if (it->second->get_member_count() == 0) {
+  if (room->get_member_count() == 0) {
     rooms.erase(it);
   }
 
@@ -160,17 +162,17 @@ std::vector<std::shared_ptr<Room>> Server::list_rooms() const {
   return result;
 }
 
-asio::awaitable<void> Server::broadcast_to_room(int room_id,
-                                                const std::string &message) {
-  auto room = get_room(room_id);
-  if (!room) {
-    co_return;
-  }
+// asio::awaitable<void> Server::broadcast_to_room(int room_id,
+//                                                 const std::string &message) {
+//   auto room = get_room(room_id);
+//   if (!room) {
+//     co_return;
+//   }
 
-  for (const auto &[uid, user] : room->get_members()) {
-    (void)uid;
-    if (user && user->get_channel()) {
-      co_await user->get_channel()->send_message(message);
-    }
-  }
-}
+//   for (const auto &[uid, user] : room->get_members()) {
+//     (void)uid;
+//     if (user && user->get_channel()) {
+//       co_await user->get_channel()->send_message(message);
+//     }
+//   }
+// }

@@ -15,39 +15,70 @@ constexpr std::string_view HEADER = "CHAT";
 constexpr int HEADER_SIZE = 4;
 constexpr int MAX_MESSAGE_SIZE = 65536;
 
-// Command types
-enum class CommandType {
-  REGISTER,
-  LOGIN,
-  CREATE_ROOM,
-  JOIN_ROOM,
-  LEAVE_ROOM,
-  LIST_ROOMS,
-  SEND_MESSAGE,
+// Single source of truth for command names.
+#define PROTOCOL_COMMAND_TYPE_TABLE(X) \
+  X(REGISTER, "register")             \
+  X(LOGIN, "login")                   \
+  X(CREATE_ROOM, "create_room")       \
+  X(JOIN_ROOM, "join_room")           \
+  X(LEAVE_ROOM, "leave_room")         \
+  X(LIST_ROOMS, "list_rooms")         \
+  X(SEND_MESSAGE, "send_message")
 
+enum class CommandType {
+#define X(name, str) name,
+  PROTOCOL_COMMAND_TYPE_TABLE(X)
+#undef X
   ERROR = 100
 };
+
+inline std::string command_type_to_string(CommandType type) {
+  switch (type) {
+#define X(name, str)   \
+  case CommandType::name: \
+    return str;
+  
+  PROTOCOL_COMMAND_TYPE_TABLE(X)
+
+#undef X
+  case CommandType::ERROR:
+  default:
+    return "error";
+  }
+}
+
+inline CommandType command_type_from_string(const std::string &type) {
+#define X(name, str) \
+  if (type == str)   \
+    return CommandType::name;
+  
+  PROTOCOL_COMMAND_TYPE_TABLE(X)
+
+#undef X
+  if (type == "error")
+    return CommandType::ERROR;
+  return CommandType::ERROR;
+}
+
+inline void to_json(json &j, const CommandType &type) {
+  j = command_type_to_string(type);
+}
+
+inline void from_json(const json &j, CommandType &type) {
+  if (!j.is_string()) {
+    type = CommandType::ERROR;
+    return;
+  }
+  type = command_type_from_string(j.get<std::string>());
+}
 
 struct PlayerBasicInfo {
   std::string uid;
   std::string userName;
   int avatarType = -1;
 
-  json to_json() const {
-    json j;
-    j["uid"] = uid;
-    j["userName"] = userName;
-    j["avatarType"] = avatarType;
-    return j;
-  }
-
-  static PlayerBasicInfo from_json(const json &j) {
-    PlayerBasicInfo info;
-    info.uid = j.value("uid", "");
-    info.userName = j.value("userName", "");
-    info.avatarType = j.value("avatarType", -1);
-    return info;
-  }
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(PlayerBasicInfo, uid, userName,
+                                              avatarType)
 };
 
 struct Envelope {
@@ -57,54 +88,20 @@ struct Envelope {
   std::string message;
   json data = json::object();
 
-  json to_json() const {
-    json j;
-    j["type"] = static_cast<int>(type);
-    j["status"] = status;
-    j["errorCode"] = errorCode;
-    j["message"] = message;
-    j["data"] = data;
-    return j;
-  }
-
-  static Envelope from_json(const json &j) {
-    Envelope env;
-    env.type = static_cast<CommandType>(j.value("type", 100));
-    env.status = j.value("status", false);
-    env.errorCode = j.value("errorCode", 0);
-    env.message = j.value("message", "");
-    if (j.contains("data") && j["data"].is_object()) {
-      env.data = j["data"];
-    } else {
-      env.data = json::object();
-    }
-
-    return env;
-  }
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Envelope, type, status,
+                                              errorCode, message, data)
 };
 
 struct RegisterReq {
   PlayerBasicInfo info;
 
-  static RegisterReq from_json(const json &j) {
-    RegisterReq req;
-    req.info = Protocol::PlayerBasicInfo::from_json(j);
-    return req;
-  }
-
-  json to_json() const { return info.to_json(); }
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(RegisterReq, info)
 };
 
 struct LoginReq {
   std::string uid;
 
-  static LoginReq from_json(const json &j) {
-    LoginReq req;
-    req.uid = j.value("uid", "");
-    return req;
-  }
-
-  json to_json() const { return {{"uid", uid}}; }
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(LoginReq, uid)
 };
 
 struct CreateRoomReq {
@@ -112,106 +109,56 @@ struct CreateRoomReq {
   std::string roomName;
   int maximumPeople = -1;
 
-  static CreateRoomReq from_json(const json &j) {
-    CreateRoomReq req;
-    req.uid = j.value("uid", "");
-    req.roomName = j.value("roomName", "");
-    req.maximumPeople = j.value("maximumPeople", -1);
-    return req;
-  }
-
-  json to_json() const {
-    return {{"roomName", roomName}, {"maximumPeople", maximumPeople}};
-  }
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(CreateRoomReq, uid, roomName,
+                                              maximumPeople)
 };
 
 struct JoinRoomReq {
   int roomId = -1;
   std::string uid;
 
-  static JoinRoomReq from_json(const json &j) {
-    JoinRoomReq req;
-    req.uid = j.value("uid", "");
-    req.roomId = j.value("roomId", -1);
-    return req;
-  }
-
-  json to_json() const { return {{"roomId", roomId}}; }
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(JoinRoomReq, roomId, uid)
 };
 
 struct LeaveRoomReq {
   std::string uid;
-  static LeaveRoomReq from_json(const json &j) {
-    LeaveRoomReq req;
-    req.uid = j.value("uid", "");
-    return req;
-  }
 
-  json to_json() const { return json::object(); }
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(LeaveRoomReq, uid)
 };
 
 struct ListRoomsReq {
-  static ListRoomsReq from_json(const json &) { return {}; }
 
-  json to_json() const { return json::object(); }
 };
 
 struct SendMessageReq {
   std::string content;
 
-  static SendMessageReq from_json(const json &j) {
-    SendMessageReq req;
-    req.content = j.value("content", "");
-    return req;
-  }
-
-  json to_json() const { return {{"content", content}}; }
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(SendMessageReq, content)
 };
 
 struct LoginRsp {
   PlayerBasicInfo info;
 
-  json to_json() const { return info.to_json(); }
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(LoginRsp, info)
 };
 
 struct CreateRoomRsp {
-  //  PlayerBasicInfo info;
   int roomId = -1;
-  //  std::string roomName;
 
-  json to_json() const {
-    //    json j = info.to_json();
-    json j;
-    j["roomId"] = roomId;
-    //    j["roomName"] = roomName;
-    return j;
-  }
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(CreateRoomRsp, roomId)
 };
 
 struct JoinRoomRsp {
-  std::vector<PlayerBasicInfo> infos;
-  //  int roomId = -1;
-  //  std::string roomName;
+  std::vector<PlayerBasicInfo> PlayerBasicInfos;
 
-  json to_json() const {
-    json j;
-    for (auto info : infos)
-      j["PlayerBasicInfos"].emplace_back(info.to_json());
-    //    j["roomId"] = roomId;
-    //    j["roomName"] = roomName;
-    return j;
-  }
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(JoinRoomRsp, PlayerBasicInfos)
 };
 
 struct LeaveRoomRsp {
   PlayerBasicInfo info;
   int roomId = -1;
 
-  json to_json() const {
-    json j = info.to_json();
-    j["roomId"] = roomId;
-    return j;
-  }
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(LeaveRoomRsp, info, roomId)
 };
 
 struct RoomInfo {
@@ -219,24 +166,14 @@ struct RoomInfo {
   int maximumPeople;
   size_t peopleCount;
 
-  json to_json() const {
-    json j;
-    j["roomId"] = roomId;
-    j["maximumPeople"] = maximumPeople;
-    j["peopleCount"] = peopleCount;
-    return j;
-  }
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(RoomInfo, roomId, maximumPeople,
+                                              peopleCount)
 };
 
 struct ListRoomsRsp {
   std::vector<RoomInfo> RoomInfos;
 
-  json to_json() const {
-    json j;
-    for (auto RoomInfo : RoomInfos)
-      j["RoomInfos"].emplace_back(RoomInfo.to_json());
-    return j;
-  }
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(ListRoomsRsp, RoomInfos)
 };
 
 struct SendMessagePush {
@@ -244,12 +181,10 @@ struct SendMessagePush {
   int roomId = -1;
   std::string content;
 
-  json to_json() const {
-    json j = info.to_json();
-    j["roomId"] = roomId;
-    j["content"] = content;
-    return j;
-  }
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(SendMessagePush, info, roomId,
+                                              content)
 };
+
+#undef PROTOCOL_COMMAND_TYPE_TABLE
 
 } // namespace Protocol

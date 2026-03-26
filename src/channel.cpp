@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <system_error>
@@ -70,54 +71,44 @@ Protocol::Envelope Channel::make_err_env(Protocol::CommandType type,
 }
 
 Protocol::CommandType Channel::parse_command_type(const json &j) {
-  if (j.contains("type") && j["type"].is_string()) {
-    const std::string type = j.value("type", "");
-    if (type == "register")
-      return Protocol::CommandType::REGISTER;
-    if (type == "login")
-      return Protocol::CommandType::LOGIN;
-    if (type == "create_room")
-      return Protocol::CommandType::CREATE_ROOM;
-    if (type == "join_room")
-      return Protocol::CommandType::JOIN_ROOM;
-    if (type == "leave_room")
-      return Protocol::CommandType::LEAVE_ROOM;
-    if (type == "list_rooms")
-      return Protocol::CommandType::LIST_ROOMS;
-    if (type == "send_message")
-      return Protocol::CommandType::SEND_MESSAGE;
+  if (!j.contains("type") || !j["type"].is_string()) {
+    return Protocol::CommandType::ERROR;
   }
-  return Protocol::CommandType::ERROR;
+  return Protocol::command_type_from_string(j.value("type", "error"));
 }
 
 // handle REGISTER
 Protocol::Envelope Channel::handle_register(const json &j) {
-  Protocol::RegisterReq req = Protocol::RegisterReq::from_json(j);
+  auto req = j.get<Protocol::RegisterReq>();
   user = server->register_user(req.info, shared_from_this());
 
   Protocol::LoginRsp rsp;
   rsp.info = req.info;
   rsp.info.uid = user->get_uid();
   std::cout << "User " << user->get_uid() << " registered" << std::endl;
-  return make_ok_env(Protocol::CommandType::LOGIN, rsp.to_json());
+  return make_ok_env(Protocol::CommandType::REGISTER, json(rsp));
 }
 
 // handle LOGIN
 Protocol::Envelope Channel::handle_login(const json &j) {
-  Protocol::LoginReq req = Protocol::LoginReq::from_json(j);
+  auto req = j.get<Protocol::LoginReq>();
   auto loggedInUser = server->login_user(req.uid, shared_from_this());
 
+  if(!loggedInUser) {
+    return make_err_env(Protocol::CommandType::LOGIN, 1001,
+                        "uid not exists");
+  }
   Protocol::LoginRsp rsp;
   rsp.info.uid = loggedInUser->get_uid();
   rsp.info.avatarType = loggedInUser->get_avatar_type();
   rsp.info.userName = loggedInUser->get_username();
   std::cout << "User " << req.uid << " logged in" << std::endl;
-  return make_ok_env(Protocol::CommandType::LOGIN, rsp.to_json());
+  return make_ok_env(Protocol::CommandType::LOGIN, json(rsp));
 }
 
 // handle CREATE_ROOM
 Protocol::Envelope Channel::handle_create_room(const json &j) {
-  Protocol::CreateRoomReq req = Protocol::CreateRoomReq::from_json(j);
+  auto req = j.get<Protocol::CreateRoomReq>();
   auto reqUser = server->get_user(req.uid);
   if (!reqUser) {
     return make_err_env(Protocol::CommandType::CREATE_ROOM, 2001,
@@ -128,17 +119,17 @@ Protocol::Envelope Channel::handle_create_room(const json &j) {
                         "Room name cannot be empty");
   }
 
-  auto room = server->create_room(req.roomName, reqUser);
+  auto room = server->create_room(req.roomName,  req.maximumPeople, reqUser);
   Protocol::CreateRoomRsp rsp;
   rsp.roomId = room->get_id();
   std::cout << "Room " << req.roomName << " created with id " << room->get_id()
             << std::endl;
-  return make_ok_env(Protocol::CommandType::CREATE_ROOM, rsp.to_json());
+  return make_ok_env(Protocol::CommandType::CREATE_ROOM, json(rsp));
 }
 
 // hanlde JOIN_ROOM
 Protocol::Envelope Channel::handle_join_room(const json &j) {
-  Protocol::JoinRoomReq req = Protocol::JoinRoomReq::from_json(j);
+  auto req = j.get<Protocol::JoinRoomReq>();
   auto reqUser = server->get_user(req.uid);
   if (!reqUser) {
     return make_err_env(Protocol::CommandType::JOIN_ROOM, 3001,
@@ -161,10 +152,10 @@ Protocol::Envelope Channel::handle_join_room(const json &j) {
     info.uid = memberUid;
     info.userName = member->get_username();
     info.avatarType = member->get_avatar_type();
-    rsp.infos.push_back(info);
+    rsp.PlayerBasicInfos.push_back(info);
   }
   std::cout << "User " << req.uid << " joined room " << req.roomId << std::endl;
-  return make_ok_env(Protocol::CommandType::JOIN_ROOM, rsp.to_json());
+  return make_ok_env(Protocol::CommandType::JOIN_ROOM, json(rsp));
 }
 
 // handle LIST_ROOMS
@@ -175,15 +166,15 @@ Protocol::Envelope Channel::handle_list_rooms(const json &) {
   for (const auto &room : rooms) {
     Protocol::RoomInfo roomInfo;
     roomInfo.roomId = room->get_id();
-    roomInfo.maximumPeople = -1;
+    roomInfo.maximumPeople = room->get_maximum_people();
     roomInfo.peopleCount = room->get_member_count();
     rsp.RoomInfos.push_back(roomInfo);
   }
-  return make_ok_env(Protocol::CommandType::LIST_ROOMS, rsp.to_json());
+  return make_ok_env(Protocol::CommandType::LIST_ROOMS, json(rsp));
 }
 
 Protocol::Envelope Channel::handle_leave_room(const json &j) {
-  Protocol::LeaveRoomReq req = Protocol::LeaveRoomReq::from_json(j);
+  auto req = j.get<Protocol::LeaveRoomReq>();
   auto reqUser = server->get_user(req.uid);
   if (!reqUser) {
     return make_err_env(Protocol::CommandType::LEAVE_ROOM, 4001,
@@ -248,7 +239,7 @@ asio::awaitable<void> Channel::handle_message(std::string &msg) {
   }
 
   // Send response outside try-catch to avoid co_await issue
-  bool sent = co_await send_message(responseEnv.to_json().dump() + "\n");
+  bool sent = co_await send_message(json(responseEnv).dump() + "\n");
   if (!sent) {
     log("Failed to send response\n");
     if (user) {
