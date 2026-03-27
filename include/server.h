@@ -1,11 +1,13 @@
 #pragma once
-#include "protocol.h"
-#include <asio/awaitable.hpp>
-#include <asio/io_context.hpp>
-#include <asio/ip/tcp.hpp>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+
+#include <asio/awaitable.hpp>
+#include <asio/io_context.hpp>
+#include <asio/ip/tcp.hpp>
+
+#include "protocol.h"
 
 class Channel;
 class User;
@@ -44,7 +46,7 @@ public:
   std::shared_ptr<Room> get_room(int room_id) const;
   bool join_room(std::shared_ptr<Room> room, std::shared_ptr<User> user);
   bool leave_room(int room_id, const std::string &uid);
-  std::vector<std::shared_ptr<Room>> list_rooms() const;
+  void list_rooms(std::vector<Protocol::RoomInfo> &roomInfos) const;
 
   // Message broadcasting
   asio::awaitable<void> broadcast_to_room(int room_id,

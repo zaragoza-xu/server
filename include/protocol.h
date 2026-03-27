@@ -1,10 +1,11 @@
 #pragma once
 
 #include <cstddef>
-#include <nlohmann/json.hpp>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include <nlohmann/json.hpp>
 
 using json = nlohmann::json;
 
@@ -137,9 +138,9 @@ struct SendMessageReq {
 };
 
 struct LoginRsp {
-  PlayerBasicInfo info;
+  PlayerBasicInfo basicInfo;
 
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(LoginRsp, info)
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(LoginRsp, basicInfo)
 };
 
 struct CreateRoomRsp {
@@ -149,9 +150,9 @@ struct CreateRoomRsp {
 };
 
 struct JoinRoomRsp {
-  std::vector<PlayerBasicInfo> PlayerBasicInfos;
+  std::vector<PlayerBasicInfo> PlayerInfos;
 
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(JoinRoomRsp, PlayerBasicInfos)
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(JoinRoomRsp, PlayerInfos)
 };
 
 struct LeaveRoomRsp {
@@ -163,7 +164,7 @@ struct LeaveRoomRsp {
 
 struct RoomInfo {
   int roomId;
-  int maximumPeople;
+  size_t maximumPeople;
   size_t peopleCount;
 
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(RoomInfo, roomId, maximumPeople,

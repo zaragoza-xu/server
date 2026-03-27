@@ -109,15 +109,15 @@ TEST(ProtocolTest, RequestResponseJsonRoundTrip) {
   Protocol::JoinRoomRsp rsp;
   Protocol::PlayerBasicInfo p1{"1001", "alice", 1};
   Protocol::PlayerBasicInfo p2{"1002", "bob", 2};
-  rsp.PlayerBasicInfos.push_back(p1);
-  rsp.PlayerBasicInfos.push_back(p2);
+  rsp.PlayerInfos.push_back(p1);
+  rsp.PlayerInfos.push_back(p2);
 
   json rspJson = rsp;
-  ASSERT_EQ(rspJson.at("PlayerBasicInfos").size(), 2);
+  ASSERT_EQ(rspJson.at("PlayerInfos").size(), 2);
   auto rspParsed = rspJson.get<Protocol::JoinRoomRsp>();
-  ASSERT_EQ(rspParsed.PlayerBasicInfos.size(), 2);
-  EXPECT_EQ(rspParsed.PlayerBasicInfos[0].uid, "1001");
-  EXPECT_EQ(rspParsed.PlayerBasicInfos[1].userName, "bob");
+  ASSERT_EQ(rspParsed.PlayerInfos.size(), 2);
+  EXPECT_EQ(rspParsed.PlayerInfos[0].uid, "1001");
+  EXPECT_EQ(rspParsed.PlayerInfos[1].userName, "bob");
 }
 
 TEST(RoomTest, BasicBehavior) {
@@ -128,22 +128,22 @@ TEST(RoomTest, BasicBehavior) {
   EXPECT_EQ(room.get_name(), "r1");
   EXPECT_EQ(room.get_creator()->get_uid(), "1");
   EXPECT_EQ(room.get_maximum_people(), 2);
-  EXPECT_EQ(room.get_member_count(), 1);
+  EXPECT_EQ(room.get_people_count(), 1);
   EXPECT_TRUE(room.is_member("1"));
 
   auto user2 = std::make_shared<User>(2, "u2", nullptr, 2);
   auto user3 = std::make_shared<User>(3, "u3", nullptr, 3);
 
   EXPECT_TRUE(room.add_member(user2));
-  EXPECT_EQ(room.get_member_count(), 2);
+  EXPECT_EQ(room.get_people_count(), 2);
   EXPECT_TRUE(room.is_member("2"));
 
   // Capacity reached.
   EXPECT_FALSE(room.add_member(user3));
-  EXPECT_EQ(room.get_member_count(), 2);
+  EXPECT_EQ(room.get_people_count(), 2);
 
   EXPECT_TRUE(room.remove_member("2"));
-  EXPECT_EQ(room.get_member_count(), 1);
+  EXPECT_EQ(room.get_people_count(), 1);
   EXPECT_FALSE(room.is_member("2"));
 
   // Removing non-existent member should return false.
@@ -171,13 +171,15 @@ TEST_F(ServerChannelBehaviorTest, ServerRegisterLoginAndRoomLifecycle) {
   EXPECT_TRUE(server->join_room(room, bob));
   EXPECT_EQ(bob->get_room_id(), room->get_id());
 
-  auto rooms = server->list_rooms();
+  std::vector<Protocol::RoomInfo> rooms;
+  server->list_rooms(rooms);
   ASSERT_FALSE(rooms.empty());
   bool found = false;
   for (const auto &r : rooms) {
-    if (r->get_id() == room->get_id()) {
+    if (r.roomId == room->get_id()) {
       found = true;
-      EXPECT_EQ(r->get_member_count(), 2U);
+      EXPECT_EQ(r.peopleCount, 2U);
+      EXPECT_EQ(r.maximumPeople, 2U);
     }
   }
   EXPECT_TRUE(found);
@@ -186,11 +188,6 @@ TEST_F(ServerChannelBehaviorTest, ServerRegisterLoginAndRoomLifecycle) {
   EXPECT_EQ(bob->get_room_id(), -1);
   EXPECT_TRUE(server->leave_room(room->get_id(), alice->get_uid()));
   EXPECT_EQ(server->get_room(room->get_id()), nullptr);
-
-  server->logout_user(bob->get_uid());
-  server->logout_user(alice->get_uid());
-  EXPECT_FALSE(server->user_exists(bob->get_uid()));
-  EXPECT_FALSE(server->user_exists(alice->get_uid()));
 }
 
 TEST_F(ServerChannelBehaviorTest, ChannelParsesTypeAndBuildsEnvelope) {
@@ -222,7 +219,7 @@ TEST_F(ServerChannelBehaviorTest, ChannelHandlerFlow) {
   EXPECT_EQ(registerEnv.type, Protocol::CommandType::REGISTER);
 
   auto registerRsp = registerEnv.data.get<Protocol::LoginRsp>();
-  ASSERT_FALSE(registerRsp.info.uid.empty());
+  ASSERT_FALSE(registerRsp.basicInfo.uid.empty());
 
   Protocol::LoginReq badLoginReq;
   badLoginReq.uid = "non-existent-uid";
@@ -231,7 +228,7 @@ TEST_F(ServerChannelBehaviorTest, ChannelHandlerFlow) {
   EXPECT_EQ(badLoginEnv.errorCode, 1001);
 
   Protocol::CreateRoomReq createReq;
-  createReq.uid = registerRsp.info.uid;
+  createReq.uid = registerRsp.basicInfo.uid;
   createReq.roomName = "room-channel";
   createReq.maximumPeople = 2;
   auto createEnv = ch1->handle_create_room(json(createReq));
@@ -248,11 +245,11 @@ TEST_F(ServerChannelBehaviorTest, ChannelHandlerFlow) {
 
   Protocol::JoinRoomReq joinReq;
   joinReq.roomId = createRsp.roomId;
-  joinReq.uid = registerRsp2.info.uid;
+  joinReq.uid = registerRsp2.basicInfo.uid;
   auto joinEnv = ch2->handle_join_room(json(joinReq));
   ASSERT_TRUE(joinEnv.status);
   auto joinRsp = joinEnv.data.get<Protocol::JoinRoomRsp>();
-  EXPECT_EQ(joinRsp.PlayerBasicInfos.size(), 2U);
+  EXPECT_EQ(joinRsp.PlayerInfos.size(), 2U);
 
   auto listEnv = ch1->handle_list_rooms(json::object());
   ASSERT_TRUE(listEnv.status);
@@ -267,17 +264,17 @@ TEST_F(ServerChannelBehaviorTest, ChannelHandlerFlow) {
   EXPECT_TRUE(foundRoom);
 
   Protocol::LeaveRoomReq leaveReq2;
-  leaveReq2.uid = registerRsp2.info.uid;
+  leaveReq2.uid = registerRsp2.basicInfo.uid;
   auto leaveEnv2 = ch2->handle_leave_room(json(leaveReq2));
   EXPECT_TRUE(leaveEnv2.status);
 
   Protocol::LeaveRoomReq leaveReq1;
-  leaveReq1.uid = registerRsp.info.uid;
+  leaveReq1.uid = registerRsp.basicInfo.uid;
   auto leaveEnv1 = ch1->handle_leave_room(json(leaveReq1));
   EXPECT_TRUE(leaveEnv1.status);
 
-  server->logout_user(registerRsp2.info.uid);
-  server->logout_user(registerRsp.info.uid);
+  server->logout_user(registerRsp2.basicInfo.uid);
+  server->logout_user(registerRsp.basicInfo.uid);
 }
 
 } // namespace

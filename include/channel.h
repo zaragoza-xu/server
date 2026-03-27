@@ -1,11 +1,12 @@
 #pragma once
 
 #include <array>
+#include <memory>
+#include <string>
+
 #include <asio/awaitable.hpp>
 #include <asio/io_context.hpp>
 #include <asio/ip/tcp.hpp>
-#include <memory>
-#include <string>
 
 #include "protocol.h"
 

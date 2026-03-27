@@ -1,8 +1,10 @@
-#include "server.h"
-#include <asio/io_context.hpp>
 #include <exception>
-#include <httplib.h>
 #include <iostream>
+
+#include <httplib.h>
+#include <asio/io_context.hpp>
+
+#include "server.h"
 
 int main() {
   try {

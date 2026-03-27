@@ -1,19 +1,21 @@
+#include "server.h"
+#include <cstddef>
+#include <iostream>
+#include <memory>
+#include <mutex>
+#include <vector>
+
 #include <asio/awaitable.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/ip/tcp.hpp>
 #include <asio/redirect_error.hpp>
 #include <asio/use_awaitable.hpp>
-#include <cstddef>
-#include <iostream>
-#include <memory>
-#include <mutex>
 
 #include "channel.h"
 #include "error.h"
 #include "protocol.h"
 #include "room.h"
-#include "server.h"
 #include "user.h"
 
 using namespace asio::ip;
@@ -67,17 +69,11 @@ auto Server::login_user(const std::string &uid,
 
 void Server::logout_user(const std::string &uid) {
   std::shared_ptr<User> user;
-  {
-    std::lock_guard<std::mutex> lock(usersMutex);
-    auto it = users.find(uid);
-    if (it == users.end()) {
-      return;
-    }
-    user = it->second;
-    users.erase(it);
+  std::lock_guard<std::mutex> lock(usersMutex);
+  auto it = users.find(uid);
+  if (it == users.end()) {
+    return;
   }
-
-  // Leave room after releasing usersMutex to avoid lock re-entry.
   if (user && user->is_in_room()) {
     leave_room(user->get_room_id(), uid);
   }
@@ -97,7 +93,8 @@ bool Server::user_exists(const std::string &uid) const {
   return users.count(uid) > 0;
 }
 
-std::shared_ptr<Room> Server::create_room(const std::string &roomName, const size_t maximumPeople,
+std::shared_ptr<Room> Server::create_room(const std::string &roomName,
+                                          const size_t maximumPeople,
                                           std::shared_ptr<User> user) {
   std::lock_guard<std::mutex> lock(roomsMutex);
   int room_id = nextRoomId++;
@@ -136,30 +133,27 @@ bool Server::leave_room(int room_id, const std::string &uid) {
   }
 
   auto room = it->second;
-
-  auto memberIt = room->get_members().find(uid);
-  if(memberIt == room->get_members().end())
+  auto member = room->get_member(uid);
+  if (member == nullptr)
     return false;
-  std::shared_ptr<User> member = memberIt->second;
 
   room->remove_member(uid);
   member->set_room_id(-1);
 
   // Delete empty rooms
-  if (room->get_member_count() == 0) {
+  if (room->get_people_count() == 0) {
     rooms.erase(it);
   }
-
   return true;
 }
 
-std::vector<std::shared_ptr<Room>> Server::list_rooms() const {
+void Server::list_rooms(std::vector<Protocol::RoomInfo> &roomInfos) const {
   std::lock_guard<std::mutex> lock(roomsMutex);
-  std::vector<std::shared_ptr<Room>> result;
   for (const auto &[id, room] : rooms) {
-    result.push_back(room);
+    roomInfos.push_back({.roomId = id,
+                         .maximumPeople = room->get_maximum_people(),
+                         .peopleCount = room->get_people_count()});
   }
-  return result;
 }
 
 // asio::awaitable<void> Server::broadcast_to_room(int room_id,

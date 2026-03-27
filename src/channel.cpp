@@ -1,8 +1,5 @@
-#include <asio/async_result.hpp>
-#include <asio/awaitable.hpp>
-#include <asio/redirect_error.hpp>
-#include <asio/use_awaitable.hpp>
-#include <asio/write.hpp>
+#include "channel.h"
+
 #include <cstddef>
 #include <iostream>
 #include <memory>
@@ -11,7 +8,12 @@
 #include <string>
 #include <system_error>
 
-#include "channel.h"
+#include <asio/async_result.hpp>
+#include <asio/awaitable.hpp>
+#include <asio/redirect_error.hpp>
+#include <asio/use_awaitable.hpp>
+#include <asio/write.hpp>
+
 #include "error.h"
 #include "protocol.h"
 #include "room.h"
@@ -94,9 +96,8 @@ Protocol::Envelope Channel::handle_login(const json &j) {
   auto req = j.get<Protocol::LoginReq>();
   auto loggedInUser = server->login_user(req.uid, shared_from_this());
 
-  if(!loggedInUser) {
-    return make_err_env(Protocol::CommandType::LOGIN, 1001,
-                        "uid not exists");
+  if (!loggedInUser) {
+    return make_err_env(Protocol::CommandType::LOGIN, 1001, "uid not exists");
   }
   Protocol::LoginRsp rsp;
   rsp.info.uid = loggedInUser->get_uid();
@@ -119,7 +120,7 @@ Protocol::Envelope Channel::handle_create_room(const json &j) {
                         "Room name cannot be empty");
   }
 
-  auto room = server->create_room(req.roomName,  req.maximumPeople, reqUser);
+  auto room = server->create_room(req.roomName, req.maximumPeople, reqUser);
   Protocol::CreateRoomRsp rsp;
   rsp.roomId = room->get_id();
   std::cout << "Room " << req.roomName << " created with id " << room->get_id()
@@ -147,13 +148,7 @@ Protocol::Envelope Channel::handle_join_room(const json &j) {
   }
 
   Protocol::JoinRoomRsp rsp;
-  for (const auto &[memberUid, member] : room->get_members()) {
-    Protocol::PlayerBasicInfo info;
-    info.uid = memberUid;
-    info.userName = member->get_username();
-    info.avatarType = member->get_avatar_type();
-    rsp.PlayerBasicInfos.push_back(info);
-  }
+  room->collect_members_info(rsp.PlayerInfos);
   std::cout << "User " << req.uid << " joined room " << req.roomId << std::endl;
   return make_ok_env(Protocol::CommandType::JOIN_ROOM, json(rsp));
 }
@@ -161,15 +156,7 @@ Protocol::Envelope Channel::handle_join_room(const json &j) {
 // handle LIST_ROOMS
 Protocol::Envelope Channel::handle_list_rooms(const json &) {
   Protocol::ListRoomsRsp rsp;
-  auto rooms = server->list_rooms();
-  rsp.RoomInfos.reserve(rooms.size());
-  for (const auto &room : rooms) {
-    Protocol::RoomInfo roomInfo;
-    roomInfo.roomId = room->get_id();
-    roomInfo.maximumPeople = room->get_maximum_people();
-    roomInfo.peopleCount = room->get_member_count();
-    rsp.RoomInfos.push_back(roomInfo);
-  }
+  server->list_rooms(rsp.RoomInfos);
   return make_ok_env(Protocol::CommandType::LIST_ROOMS, json(rsp));
 }
 
@@ -239,7 +226,7 @@ asio::awaitable<void> Channel::handle_message(std::string &msg) {
   }
 
   // Send response outside try-catch to avoid co_await issue
-  bool sent = co_await send_message(json(responseEnv).dump() + "\n");
+  bool sent = co_await send_message(json(responseEnv).dump());
   if (!sent) {
     log("Failed to send response\n");
     if (user) {
