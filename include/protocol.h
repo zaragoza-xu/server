@@ -126,7 +126,7 @@ struct LeaveRoomReq {
 struct ListRoomsReq {
   // type mirrors CommandType for validation/routing.
   Protocol::CommandType type;
-
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(ListRoomsReq, type)
 };
 
 struct SendMessageReq {
@@ -143,6 +143,12 @@ struct HeartbeatReq {
   std::string uid;
 
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(HeartbeatReq, type, uid);
+};
+
+struct RegisterRsp {
+  std::string uid;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(RegisterRsp, uid)
 };
 
 struct LoginRsp {

@@ -116,7 +116,7 @@ Protocol::Envelope Channel::handle_register(const json &j) {
   auto req = j.get<Protocol::RegisterReq>();
   auto user = server->register_user();
   logging::log("User {} registered", user->get_uid());
-  return make_ok_env(Protocol::SERVICE_SUCCESS, json::object());
+  return make_ok_env(Protocol::SERVICE_SUCCESS, json(Protocol::RegisterRsp{user->get_uid()}));
 }
 
 // handle LOGIN
