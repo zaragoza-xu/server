@@ -1,11 +1,11 @@
 #include <exception>
 #include <memory>
 
-#include <httplib.h>
 #include <asio/io_context.hpp>
+#include <httplib.h>
 
-#include "server.h"
 #include "logging.h"
+#include "server.h"
 
 int main() {
   try {

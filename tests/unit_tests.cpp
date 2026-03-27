@@ -32,7 +32,7 @@ class ServerChannelBehaviorTest : public ::testing::Test {
 protected:
   static void SetUpTestSuite() {
     ioContext = std::make_unique<asio::io_context>();
-    server = std::make_shared<Server>(*ioContext, 0);
+    server = std::make_shared<Server>(*ioContext, 7777);
   }
 
   static void TearDownTestSuite() {
@@ -176,13 +176,13 @@ TEST_F(ServerChannelBehaviorTest, ServerRegisterLoginAndRoomLifecycle) {
 }
 
 TEST_F(ServerChannelBehaviorTest, ChannelParsesTypeAndBuildsEnvelope) {
-  auto ok = TestChannel::make_ok_env(Protocol::SERVICE_SUCCESS,
-                                     json{{"count", 1}});
+  auto ok =
+      TestChannel::make_ok_env(Protocol::SERVICE_SUCCESS, json{{"count", 1}});
   EXPECT_EQ(ok.code, Protocol::SERVICE_SUCCESS);
   EXPECT_EQ(ok.data.at("count"), 1);
 
-  auto err = TestChannel::make_err_env(Protocol::SERVICE_FAIL | Protocol::NOT_FOUND,
-                                       "uid not exists");
+  auto err = TestChannel::make_err_env(
+      Protocol::SERVICE_FAIL | Protocol::NOT_FOUND, "uid not exists");
   EXPECT_EQ(err.code, (Protocol::SERVICE_FAIL | Protocol::NOT_FOUND));
   EXPECT_EQ(err.message, "uid not exists");
 }
