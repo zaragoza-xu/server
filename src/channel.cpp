@@ -22,14 +22,35 @@
 
 using json = nlohmann::json;
 
+namespace {
+
+constexpr char FRAME_DELIMITER = '\n';
+
+} // namespace
+
 asio::awaitable<bool> Channel::send_message(const std::string &msg) {
+  if (msg.empty() || msg.size() > Protocol::MAX_MESSAGE_SIZE) {
+    co_return false;
+  }
+
+  std::string frame = msg;
+  if (frame.back() != FRAME_DELIMITER) {
+    frame.push_back(FRAME_DELIMITER);
+  }
+
+  if (frame.size() > Protocol::MAX_MESSAGE_SIZE + 1) {
+    co_return false;
+  }
+
   std::error_code ec;
-  co_await asio::async_write(socket, asio::buffer(msg),
+  co_await asio::async_write(socket, asio::buffer(frame),
                              asio::redirect_error(asio::use_awaitable, ec));
   co_return !ec;
 }
 
 asio::awaitable<void> Channel::run() {
+  std::string pending;
+
   while (true) {
     std::error_code ec;
     std::size_t len = co_await socket.async_read_some(
@@ -42,10 +63,44 @@ asio::awaitable<void> Channel::run() {
       co_return;
     }
 
-    std::string msg(buf.data(), len);
-    std::cout << "Received: " << msg << std::endl;
+    pending.append(buf.data(), len);
 
-    co_await handle_message(msg);
+    while (true) {
+      const std::size_t delimPos = pending.find(FRAME_DELIMITER);
+      if (delimPos == std::string::npos) {
+        break;
+      }
+
+      if (delimPos == 0) {
+        pending.erase(0, 1);
+        continue;
+      }
+
+      if (delimPos > Protocol::MAX_MESSAGE_SIZE) {
+        log("Invalid payload length: %zu\n", delimPos);
+        if (user) {
+          server->logout_user(user->get_uid());
+        }
+        co_return;
+      }
+
+      std::string msg = pending.substr(0, delimPos);
+      if (!msg.empty() && msg.back() == '\r') {
+        msg.pop_back();
+      }
+      std::cout << "Received: " << msg << std::endl;
+      pending.erase(0, delimPos + 1);
+
+      co_await handle_message(msg);
+    }
+
+    if (pending.size() > Protocol::MAX_MESSAGE_SIZE + 1) {
+      log("Payload without delimiter is too large: %zu\n", pending.size());
+      if (user) {
+        server->logout_user(user->get_uid());
+      }
+      co_return;
+    }
   }
 }
 
@@ -85,8 +140,8 @@ Protocol::Envelope Channel::handle_register(const json &j) {
   user = server->register_user(req.info, shared_from_this());
 
   Protocol::LoginRsp rsp;
-  rsp.info = req.info;
-  rsp.info.uid = user->get_uid();
+  rsp.basicInfo = req.info;
+  rsp.basicInfo.uid = user->get_uid();
   std::cout << "User " << user->get_uid() << " registered" << std::endl;
   return make_ok_env(Protocol::CommandType::REGISTER, json(rsp));
 }
@@ -100,9 +155,9 @@ Protocol::Envelope Channel::handle_login(const json &j) {
     return make_err_env(Protocol::CommandType::LOGIN, 1001, "uid not exists");
   }
   Protocol::LoginRsp rsp;
-  rsp.info.uid = loggedInUser->get_uid();
-  rsp.info.avatarType = loggedInUser->get_avatar_type();
-  rsp.info.userName = loggedInUser->get_username();
+  rsp.basicInfo.uid = loggedInUser->get_uid();
+  rsp.basicInfo.avatarType = loggedInUser->get_avatar_type();
+  rsp.basicInfo.userName = loggedInUser->get_username();
   std::cout << "User " << req.uid << " logged in" << std::endl;
   return make_ok_env(Protocol::CommandType::LOGIN, json(rsp));
 }
