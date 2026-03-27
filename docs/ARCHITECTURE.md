@@ -151,7 +151,7 @@
   - `get_room(int)`
   - `join_room(std::shared_ptr<Room>, std::shared_ptr<User>)`
   - `leave_room(int, const std::string&)`
-  - `list_rooms()`
+  - `list_rooms(std::vector<Protocol::RoomInfo>&)`
 
 ### 4.2 Channel 接口
 
