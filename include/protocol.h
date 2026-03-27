@@ -108,7 +108,7 @@ struct LoginReq {
 struct CreateRoomReq {
   std::string uid;
   std::string roomName;
-  int maximumPeople = -1;
+  size_t maximumPeople = 0;
 
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(CreateRoomReq, uid, roomName,
                                               maximumPeople)

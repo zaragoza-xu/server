@@ -20,8 +20,8 @@
 
 using namespace asio::ip;
 
-Server::Server(asio::io_context &context)
-    : ioContext(context), acceptor(context, tcp::endpoint(tcp::v4(), SVR_PORT)),
+Server::Server(asio::io_context &context, int port)
+    : ioContext(context), acceptor(context, tcp::endpoint(tcp::v4(), port)),
       nextRoomId(1) {
   asio::co_spawn(ioContext, accept_loop(), asio::detached);
 }
@@ -68,12 +68,12 @@ auto Server::login_user(const std::string &uid,
 }
 
 void Server::logout_user(const std::string &uid) {
-  std::shared_ptr<User> user;
   std::lock_guard<std::mutex> lock(usersMutex);
   auto it = users.find(uid);
   if (it == users.end()) {
     return;
   }
+  std::shared_ptr<User> user = it->second;
   if (user && user->is_in_room()) {
     leave_room(user->get_room_id(), uid);
   }
@@ -149,6 +149,8 @@ bool Server::leave_room(int room_id, const std::string &uid) {
 
 void Server::list_rooms(std::vector<Protocol::RoomInfo> &roomInfos) const {
   std::lock_guard<std::mutex> lock(roomsMutex);
+  roomInfos.clear();
+  roomInfos.reserve(rooms.size());
   for (const auto &[id, room] : rooms) {
     roomInfos.push_back({.roomId = id,
                          .maximumPeople = room->get_maximum_people(),

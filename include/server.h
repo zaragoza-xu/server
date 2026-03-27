@@ -15,7 +15,7 @@ class Room;
 
 class Server : public std::enable_shared_from_this<Server> {
 private:
-  static constexpr int SVR_PORT = 7777;
+  int port;
   asio::ip::tcp::acceptor acceptor;
   asio::io_context &ioContext;
   std::unordered_map<std::string, std::shared_ptr<User>> users; // uid -> User
@@ -28,7 +28,7 @@ private:
   asio::awaitable<void> accept_loop();
 
 public:
-  Server(asio::io_context &context);
+  Server(asio::io_context &context, int port);
   ~Server() = default;
 
   // User management
@@ -49,6 +49,6 @@ public:
   void list_rooms(std::vector<Protocol::RoomInfo> &roomInfos) const;
 
   // Message broadcasting
-  asio::awaitable<void> broadcast_to_room(int room_id,
-                                          const std::string &message);
+  // asio::awaitable<void> broadcast_to_room(int room_id,
+  //                                         const std::string &message);
 };
