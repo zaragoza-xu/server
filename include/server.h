@@ -1,11 +1,13 @@
 #pragma once
-#include "protocol.h"
-#include <asio/awaitable.hpp>
-#include <asio/io_context.hpp>
-#include <asio/ip/tcp.hpp>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+
+#include <asio/awaitable.hpp>
+#include <asio/io_context.hpp>
+#include <asio/ip/tcp.hpp>
+
+#include "protocol.h"
 
 class Channel;
 class User;
@@ -13,7 +15,7 @@ class Room;
 
 class Server : public std::enable_shared_from_this<Server> {
 private:
-  static constexpr int SVR_PORT = 7777;
+  int port;
   asio::ip::tcp::acceptor acceptor;
   asio::io_context &ioContext;
   std::unordered_map<std::string, std::shared_ptr<User>> users; // uid -> User
@@ -26,7 +28,7 @@ private:
   asio::awaitable<void> accept_loop();
 
 public:
-  Server(asio::io_context &context);
+  Server(asio::io_context &context, int port);
   ~Server() = default;
 
   // User management
@@ -39,14 +41,14 @@ public:
   bool user_exists(const std::string &uid) const;
 
   // Room management
-  std::shared_ptr<Room> create_room(const std::string &room_name,
-                                    std::shared_ptr<User> user);
+  std::shared_ptr<Room> create_room(const std::string &roomName, const size_t maximumPeople,
+                                          std::shared_ptr<User> user);
   std::shared_ptr<Room> get_room(int room_id) const;
   bool join_room(std::shared_ptr<Room> room, std::shared_ptr<User> user);
   bool leave_room(int room_id, const std::string &uid);
-  std::vector<std::shared_ptr<Room>> list_rooms() const;
+  void list_rooms(std::vector<Protocol::RoomInfo> &roomInfos) const;
 
   // Message broadcasting
-  asio::awaitable<void> broadcast_to_room(int room_id,
-                                          const std::string &message);
+  // asio::awaitable<void> broadcast_to_room(int room_id,
+  //                                         const std::string &message);
 };

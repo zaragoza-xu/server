@@ -1,13 +1,15 @@
-#include "server.h"
-#include <asio/io_context.hpp>
 #include <exception>
-#include <httplib.h>
 #include <iostream>
+
+#include <httplib.h>
+#include <asio/io_context.hpp>
+
+#include "server.h"
 
 int main() {
   try {
     asio::io_context io_context;
-    Server server(io_context);
+    Server server(io_context,8765);
 
     io_context.run();
 
