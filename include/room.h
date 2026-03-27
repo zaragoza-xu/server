@@ -40,7 +40,7 @@ public:
     return members.erase(uid) > 0;
   }
 
-  std::shared_ptr<User> get_member(const std::string uid) const {
+  std::shared_ptr<User> get_member(const std::string &uid) const {
     std::lock_guard<std::mutex> lock(roomMutex);
     auto memberIt = members.find(uid);
     if (memberIt == members.end())

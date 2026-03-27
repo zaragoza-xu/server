@@ -7,14 +7,15 @@
 
 Room::Room(int roomId, const std::string &roomName, size_t maximumPeople,
            std::shared_ptr<User> creator)
-    : roomId(roomId), roomName(roomName), creator(creator),
-      maximumPeople(maximumPeople) {
+    : roomId(roomId), maximumPeople(maximumPeople), roomName(roomName),
+      creator(creator) {
   members[creator->get_uid()] = creator;
 }
 
 void Room::collect_members_info(
     std::vector<Protocol::PlayerBasicInfo> &PlayerInfos) const {
   std::lock_guard<std::mutex> lock(roomMutex);
+  PlayerInfos.clear();
   PlayerInfos.reserve(members.size());
   for (auto &[uid, user] : members) {
     PlayerInfos.push_back({.uid = uid,

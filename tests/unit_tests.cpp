@@ -33,7 +33,7 @@ class ServerChannelBehaviorTest : public ::testing::Test {
 protected:
   static void SetUpTestSuite() {
     ioContext = std::make_unique<asio::io_context>();
-    server = std::make_shared<Server>(*ioContext);
+    server = std::make_shared<Server>(*ioContext, 7777);
   }
 
   static void TearDownTestSuite() {

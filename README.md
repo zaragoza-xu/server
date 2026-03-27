@@ -82,21 +82,3 @@ cmake --build build
 ```bash
 nc 127.0.0.1 7777
 ```
-
-注册示例：
-
-```json
-{"type":"register","uid":"u1001","userName":"alice","avatarType":1}
-```
-
-登录示例：
-
-```json
-{"type":"login","uid":"1"}
-```
-
-创建房间示例：
-
-```json
-{"type":"create_room","uid":"1","roomName":"lobby","maximumPeople":10}
-```
