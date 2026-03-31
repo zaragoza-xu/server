@@ -20,10 +20,8 @@ protected:
   std::shared_ptr<User> user;
   std::shared_ptr<Server> server;
 
-  static Protocol::Envelope make_ok_env(Protocol::CommandType type,
-                                        const json &data);
-  static Protocol::Envelope make_err_env(Protocol::CommandType type,
-                                         int errorCode,
+  static Protocol::Envelope make_ok_env(int code, const json &data);
+  static Protocol::Envelope make_err_env(int code,
                                          const std::string &message);
   static Protocol::CommandType parse_command_type(const json &j);
 

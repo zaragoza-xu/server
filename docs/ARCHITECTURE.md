@@ -40,9 +40,7 @@
 - 定义命令枚举 `CommandType`
 - 使用 X-Macro 维护命令名映射
 - `Envelope` 统一响应封装：
-  - `type`
-  - `status`
-  - `errorCode`
+  - `code`
   - `message`
   - `data`
 - Req/Rsp 使用 `NLOHMANN_DEFINE_TYPE_*` 宏减少样板序列化代码
@@ -87,9 +85,7 @@
 
 ```json
 {
-  "type": "login",
-  "status": true,
-  "errorCode": 0,
+  "code": 1,
   "message": "ok",
   "data": { ... }
 }
@@ -97,9 +93,7 @@
 
 说明：
 
-- `type`：字符串命令名（唯一标准）
-- `status`：业务是否成功
-- `errorCode`：错误码，0 表示成功
+- `code`：位掩码状态与细节码（例如 `SUCCESS`、`FAIL|NOT_FOUND`、`ERROR|DESERIALIZE_FAIL`）
 - `message`：错误或状态说明
 - `data`：业务载荷
 
