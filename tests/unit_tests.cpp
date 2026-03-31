@@ -109,7 +109,7 @@ TEST(ProtocolTest, RequestResponseJsonRoundTrip) {
 }
 
 TEST(RoomTest, BasicBehavior) {
-  auto creator = std::make_shared<User>(1, "creator", nullptr, 1);
+  auto creator = std::make_shared<User>("1", "creator", 1);
   Room room(10, "r1", 2, creator);
 
   EXPECT_EQ(room.get_id(), 10);
@@ -119,8 +119,8 @@ TEST(RoomTest, BasicBehavior) {
   EXPECT_EQ(room.get_people_count(), 1);
   EXPECT_TRUE(room.is_member("1"));
 
-  auto user2 = std::make_shared<User>(2, "u2", nullptr, 2);
-  auto user3 = std::make_shared<User>(3, "u3", nullptr, 3);
+  auto user2 = std::make_shared<User>("2", "u2", 2);
+  auto user3 = std::make_shared<User>("3", "u3", 3);
 
   EXPECT_TRUE(room.add_member(user2));
   EXPECT_EQ(room.get_people_count(), 2);
@@ -139,13 +139,11 @@ TEST(RoomTest, BasicBehavior) {
 }
 
 TEST_F(ServerChannelBehaviorTest, ServerRegisterLoginAndRoomLifecycle) {
-  Protocol::PlayerBasicInfo aliceInfo{"", "alice-server", 1};
-  auto alice = server->register_user(aliceInfo, ch1);
+  auto alice = server->register_user();
   ASSERT_NE(alice, nullptr);
-  EXPECT_EQ(ch1->get_user()->get_uid(), alice->get_uid());
   EXPECT_TRUE(server->user_exists(alice->get_uid()));
 
-  auto loggedIn = server->login_user(alice->get_uid(), ch2);
+  auto loggedIn = server->login_user(alice->get_uid());
   ASSERT_NE(loggedIn, nullptr);
   EXPECT_EQ(loggedIn->get_uid(), alice->get_uid());
 
@@ -153,8 +151,7 @@ TEST_F(ServerChannelBehaviorTest, ServerRegisterLoginAndRoomLifecycle) {
   ASSERT_NE(room, nullptr);
   EXPECT_EQ(alice->get_room_id(), room->get_id());
 
-  Protocol::PlayerBasicInfo bobInfo{"", "bob-server", 2};
-  auto bob = server->register_user(bobInfo, ch2);
+  auto bob = server->register_user();
   ASSERT_NE(bob, nullptr);
   EXPECT_TRUE(server->join_room(room, bob));
   EXPECT_EQ(bob->get_room_id(), room->get_id());
@@ -192,21 +189,32 @@ TEST_F(ServerChannelBehaviorTest, ChannelParsesTypeAndBuildsEnvelope) {
 
 TEST_F(ServerChannelBehaviorTest, ChannelHandlerFlow) {
   Protocol::RegisterReq registerReq;
-  registerReq.info.userName = "alice-channel";
-  registerReq.info.avatarType = 7;
+  registerReq.type = Protocol::CommandType::REGISTER;
   auto registerEnv = ch1->handle_register(json(registerReq));
   ASSERT_EQ(registerEnv.code, Protocol::SERVICE_SUCCESS);
+  EXPECT_TRUE(registerEnv.data.is_object());
+  EXPECT_TRUE(registerEnv.data.empty());
 
-  auto registerRsp = registerEnv.data.get<Protocol::LoginRsp>();
-  ASSERT_FALSE(registerRsp.basicInfo.uid.empty());
+  auto alice = server->register_user();
+  ASSERT_NE(alice, nullptr);
 
   Protocol::LoginReq badLoginReq;
+  badLoginReq.type = Protocol::CommandType::LOGIN;
   badLoginReq.uid = "non-existent-uid";
   auto badLoginEnv = ch2->handle_login(json(badLoginReq));
   EXPECT_EQ(badLoginEnv.code, (Protocol::SERVICE_FAIL | Protocol::NOT_FOUND));
 
+  Protocol::LoginReq loginReq;
+  loginReq.type = Protocol::CommandType::LOGIN;
+  loginReq.uid = alice->get_uid();
+  auto loginEnv = ch1->handle_login(json(loginReq));
+  ASSERT_EQ(loginEnv.code, Protocol::SERVICE_SUCCESS);
+  auto loginRsp = loginEnv.data.get<Protocol::LoginRsp>();
+  EXPECT_EQ(loginRsp.basicInfo.uid, alice->get_uid());
+
   Protocol::CreateRoomReq createReq;
-  createReq.uid = registerRsp.basicInfo.uid;
+  createReq.type = Protocol::CommandType::CREATE_ROOM;
+  createReq.uid = alice->get_uid();
   createReq.roomName = "room-channel";
   createReq.maximumPeople = 2;
   auto createEnv = ch1->handle_create_room(json(createReq));
@@ -214,16 +222,13 @@ TEST_F(ServerChannelBehaviorTest, ChannelHandlerFlow) {
   auto createRsp = createEnv.data.get<Protocol::CreateRoomRsp>();
   EXPECT_GT(createRsp.roomId, 0);
 
-  Protocol::RegisterReq registerReq2;
-  registerReq2.info.userName = "bob-channel";
-  registerReq2.info.avatarType = 9;
-  auto registerEnv2 = ch2->handle_register(json(registerReq2));
-  ASSERT_EQ(registerEnv2.code, Protocol::SERVICE_SUCCESS);
-  auto registerRsp2 = registerEnv2.data.get<Protocol::LoginRsp>();
+  auto bob = server->register_user();
+  ASSERT_NE(bob, nullptr);
 
   Protocol::JoinRoomReq joinReq;
+  joinReq.type = Protocol::CommandType::JOIN_ROOM;
   joinReq.roomId = createRsp.roomId;
-  joinReq.uid = registerRsp2.basicInfo.uid;
+  joinReq.uid = bob->get_uid();
   auto joinEnv = ch2->handle_join_room(json(joinReq));
   ASSERT_EQ(joinEnv.code, Protocol::SERVICE_SUCCESS);
   auto joinRsp = joinEnv.data.get<Protocol::JoinRoomRsp>();
@@ -242,17 +247,35 @@ TEST_F(ServerChannelBehaviorTest, ChannelHandlerFlow) {
   EXPECT_TRUE(foundRoom);
 
   Protocol::LeaveRoomReq leaveReq2;
-  leaveReq2.uid = registerRsp2.basicInfo.uid;
+  leaveReq2.type = Protocol::CommandType::LEAVE_ROOM;
+  leaveReq2.uid = bob->get_uid();
   auto leaveEnv2 = ch2->handle_leave_room(json(leaveReq2));
   EXPECT_EQ(leaveEnv2.code, Protocol::SERVICE_SUCCESS);
 
   Protocol::LeaveRoomReq leaveReq1;
-  leaveReq1.uid = registerRsp.basicInfo.uid;
+  leaveReq1.type = Protocol::CommandType::LEAVE_ROOM;
+  leaveReq1.uid = alice->get_uid();
   auto leaveEnv1 = ch1->handle_leave_room(json(leaveReq1));
   EXPECT_EQ(leaveEnv1.code, Protocol::SERVICE_SUCCESS);
 
-  server->logout_user(registerRsp2.basicInfo.uid);
-  server->logout_user(registerRsp.basicInfo.uid);
+  server->logout_user(bob->get_uid());
+  server->logout_user(alice->get_uid());
+}
+
+TEST_F(ServerChannelBehaviorTest, LoginAfterLogoutUsesStoredProfile) {
+  auto registered = server->register_user();
+  ASSERT_NE(registered, nullptr);
+
+  const std::string uid = registered->get_uid();
+  server->logout_user(uid);
+
+  EXPECT_TRUE(server->user_exists(uid));
+  EXPECT_EQ(server->get_user(uid), nullptr);
+
+  auto relogged = server->login_user(uid);
+  ASSERT_NE(relogged, nullptr);
+  EXPECT_EQ(relogged->get_uid(), uid);
+  EXPECT_EQ(relogged->get_username(), "");
 }
 
 } // namespace

@@ -59,9 +59,6 @@ asio::awaitable<void> Channel::run() {
         asio::buffer(buf), asio::redirect_error(asio::use_awaitable, ec));
     if (ec) {
       log("Connection closed: %s\n", ec.message());
-      if (user) {
-        server->logout_user(user->get_uid());
-      }
       co_return;
     }
 
@@ -80,9 +77,6 @@ asio::awaitable<void> Channel::run() {
 
       if (delimPos > Protocol::MAX_MESSAGE_SIZE) {
         log("Invalid payload length: %zu\n", delimPos);
-        if (user) {
-          server->logout_user(user->get_uid());
-        }
         co_return;
       }
 
@@ -98,9 +92,6 @@ asio::awaitable<void> Channel::run() {
 
     if (pending.size() > Protocol::MAX_MESSAGE_SIZE + 1) {
       log("Payload without delimiter is too large: %zu\n", pending.size());
-      if (user) {
-        server->logout_user(user->get_uid());
-      }
       co_return;
     }
   }
@@ -125,19 +116,15 @@ Protocol::Envelope Channel::make_err_env(int code, const std::string &message) {
 // handle REGISTER
 Protocol::Envelope Channel::handle_register(const json &j) {
   auto req = j.get<Protocol::RegisterReq>();
-  user = server->register_user(req.info, shared_from_this());
-
-  Protocol::LoginRsp rsp;
-  rsp.basicInfo = req.info;
-  rsp.basicInfo.uid = user->get_uid();
+  auto user = server->register_user();
   std::cout << "User " << user->get_uid() << " registered" << std::endl;
-  return make_ok_env(Protocol::SERVICE_SUCCESS, json(rsp));
+  return make_ok_env(Protocol::SERVICE_SUCCESS, json::object());
 }
 
 // handle LOGIN
 Protocol::Envelope Channel::handle_login(const json &j) {
   auto req = j.get<Protocol::LoginReq>();
-  auto loggedInUser = server->login_user(req.uid, shared_from_this());
+  auto loggedInUser = server->login_user(req.uid);
 
   if (!loggedInUser) {
     return make_err_env(Protocol::SERVICE_FAIL | Protocol::NOT_FOUND,
@@ -223,6 +210,24 @@ Protocol::Envelope Channel::handle_leave_room(const json &j) {
   return make_ok_env(Protocol::SERVICE_SUCCESS, json::object());
 }
 
+Protocol::Envelope Channel::handle_heartbeat(const json &j) {
+  auto req = j.get<Protocol::HeartbeatReq>();
+
+  std::shared_ptr<User> target = nullptr;
+  if (!req.uid.empty()) {
+    target = server->get_user(req.uid);
+  }
+
+  if (!target) {
+    return make_err_env(Protocol::SERVICE_FAIL | Protocol::NOT_FOUND,
+                        "uid not exists");
+  }
+
+  target->touch_heartbeat();
+  return make_ok_env(Protocol::SERVICE_SUCCESS,
+                     json{{"uid", target->get_uid()}});
+}
+
 // handle all
 asio::awaitable<void> Channel::handle_message(std::string &msg) {
   // Parse, dispatch by type, and respond with a single envelope.
@@ -234,6 +239,10 @@ asio::awaitable<void> Channel::handle_message(std::string &msg) {
     Protocol::CommandType type = j.value("type", Protocol::CommandType::ERROR);
 
     switch (type) {
+    case (Protocol::CommandType)0: {
+      responseEnv = make_ok_env(Protocol::SUCCESS, json::object());
+      break;
+    }
     case Protocol::CommandType::REGISTER: {
       responseEnv = handle_register(j);
       break;
@@ -258,6 +267,10 @@ asio::awaitable<void> Channel::handle_message(std::string &msg) {
       responseEnv = handle_leave_room(j);
       break;
     }
+    case Protocol::CommandType::HEARTBEAT: {
+      responseEnv = handle_heartbeat(j);
+      break;
+    }
     default:
       responseEnv = make_err_env(Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST,
                                  "Unknown command");
@@ -272,9 +285,6 @@ asio::awaitable<void> Channel::handle_message(std::string &msg) {
   bool sent = co_await send_message(json(responseEnv).dump());
   if (!sent) {
     log("Failed to send response\n");
-    if (user) {
-      server->logout_user(user->get_uid());
-    }
     co_return;
   }
 }
