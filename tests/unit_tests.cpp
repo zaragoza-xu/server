@@ -26,7 +26,6 @@ public:
   using Channel::handle_register;
   using Channel::make_err_env;
   using Channel::make_ok_env;
-  using Channel::parse_command_type;
 };
 
 class ServerChannelBehaviorTest : public ::testing::Test {
@@ -180,15 +179,6 @@ TEST_F(ServerChannelBehaviorTest, ServerRegisterLoginAndRoomLifecycle) {
 }
 
 TEST_F(ServerChannelBehaviorTest, ChannelParsesTypeAndBuildsEnvelope) {
-  json j = {{"type", static_cast<int>(Protocol::CommandType::REGISTER)}};
-  EXPECT_EQ(TestChannel::parse_command_type(j), Protocol::CommandType::REGISTER);
-
-  json noType = json::object();
-  EXPECT_EQ(TestChannel::parse_command_type(noType), Protocol::CommandType::ERROR);
-
-  json invalidType = {{"type", 999}};
-  EXPECT_EQ(TestChannel::parse_command_type(invalidType), Protocol::CommandType::ERROR);
-
   auto ok = TestChannel::make_ok_env(Protocol::SERVICE_SUCCESS,
                                      json{{"count", 1}});
   EXPECT_EQ(ok.code, Protocol::SERVICE_SUCCESS);

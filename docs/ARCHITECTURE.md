@@ -38,7 +38,7 @@
 #### Protocol
 
 - 定义命令枚举 `CommandType`
-- 使用 X-Macro 维护命令名映射
+- 命令类型使用数值编码（JSON 字段 `type`）
 - `Envelope` 统一响应封装：
   - `code`
   - `message`
@@ -94,6 +94,7 @@
 说明：
 
 - `code`：位掩码状态与细节码（例如 `SUCCESS`、`FAIL|NOT_FOUND`、`ERROR|DESERIALIZE_FAIL`）
+- `code`：位掩码状态与细节码（例如 `SUCCESS`、`FAIL|NOT_FOUND`、`ERROR|DESERIALIZE_FAIL`）
 - `message`：错误或状态说明
 - `data`：业务载荷
 
@@ -101,14 +102,15 @@
 
 当前命令：
 
-- `register`
-- `login`
-- `create_room`
-- `join_room`
-- `leave_room`
-- `list_rooms`
-- `send_message`
-- `error`
+- `1`：`register`
+- `2`：`login`
+- `3`：`create_room`
+- `4`：`join_room`
+- `5`：`leave_room`
+- `6`：`list_rooms`
+- `7`：`send_message`
+- `8`：`heartbeat`
+- `100`：`error`
 
 ### 3.3 请求/响应模型
 
@@ -121,13 +123,14 @@
 - `LeaveRoomReq`
 - `ListRoomsReq`
 - `SendMessageReq`
+- `HeartbeatReq`
 
 主要响应模型：
 
 - `LoginRsp`
 - `CreateRoomRsp`
 - `JoinRoomRsp`
-- `LeaveRoomRsp`
+- `LeaveRoomRsp`（当前注释结构，按需启用）
 - `ListRoomsRsp`
 - `SendMessagePush`
 
@@ -159,8 +162,9 @@
 ## 5. 设计取舍与现状
 
 - 已完成：
-  - type 字符串化
-  - Envelope `data` 字段统一
+- 已完成：
+  - type 数值化
+  - Envelope `code/message/data` 统一
   - 命令处理拆分
   - 协议序列化宏化
 - 待完善：
@@ -172,4 +176,5 @@
 - 为每个命令补单元测试与集成测试
 - 补全 `send_message` 全链路（请求、分发、广播）
 - 在 CI 中增加协议回归检查（字段名、type 字符串、错误码）
+- 在 CI 中增加协议回归检查（字段名、type 数值、错误码位掩码）
 - 增加并发场景测试（离房、广播、断连重入）

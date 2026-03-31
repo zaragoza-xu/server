@@ -29,6 +29,7 @@ constexpr char FRAME_DELIMITER = '\n';
 } // namespace
 
 asio::awaitable<bool> Channel::send_message(const std::string &msg) {
+  // Enforce size limits and newline framing.
   if (msg.empty() || msg.size() > Protocol::MAX_MESSAGE_SIZE) {
     co_return false;
   }
@@ -49,6 +50,7 @@ asio::awaitable<bool> Channel::send_message(const std::string &msg) {
 }
 
 asio::awaitable<void> Channel::run() {
+  // Accumulate data and split on newline delimiter.
   std::string pending;
 
   while (true) {
@@ -223,6 +225,7 @@ Protocol::Envelope Channel::handle_leave_room(const json &j) {
 
 // handle all
 asio::awaitable<void> Channel::handle_message(std::string &msg) {
+  // Parse, dispatch by type, and respond with a single envelope.
   Protocol::Envelope responseEnv =
       make_err_env(Protocol::SYSTEM_ERROR, "Unknown error");
 

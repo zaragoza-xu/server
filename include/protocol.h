@@ -17,6 +17,7 @@ constexpr int HEADER_SIZE = 4;
 constexpr int MAX_MESSAGE_SIZE = 65536;
 
 enum class CommandType : int {
+  // Numeric command identifiers used in the JSON "type" field.
   REGISTER = 1,
   LOGIN = 2,
   CREATE_ROOM = 3,
@@ -24,10 +25,12 @@ enum class CommandType : int {
   LEAVE_ROOM = 5,
   LIST_ROOMS = 6,
   SEND_MESSAGE = 7,
+  HEARTBEAT = 8,
   ERROR = 100
 };
 
 enum Code : int {
+  // Bitmask: low bits indicate status, higher bits carry detail flags.
   SUCCESS = 1,
   FAIL = 1 << 1,
   ERROR = 1 << 2,
@@ -55,6 +58,7 @@ struct PlayerBasicInfo {
 };
 
 struct Envelope {
+  // code/message describe status; data carries command-specific payload.
   int code = 0;
   std::string message;
   json data = json::object();
@@ -63,6 +67,7 @@ struct Envelope {
 };
 
 struct RegisterReq {
+  // type mirrors CommandType for validation/routing.
   Protocol::CommandType type;
   PlayerBasicInfo info;
 
@@ -70,6 +75,7 @@ struct RegisterReq {
 };
 
 struct LoginReq {
+  // type mirrors CommandType for validation/routing.
   Protocol::CommandType type;
   std::string uid;
 
@@ -77,6 +83,7 @@ struct LoginReq {
 };
 
 struct CreateRoomReq {
+  // type mirrors CommandType for validation/routing.
   Protocol::CommandType type;
   std::string uid;
   std::string roomName;
@@ -87,6 +94,7 @@ struct CreateRoomReq {
 };
 
 struct JoinRoomReq {
+  // type mirrors CommandType for validation/routing.
   Protocol::CommandType type;
   int roomId = -1;
   std::string uid;
@@ -95,6 +103,7 @@ struct JoinRoomReq {
 };
 
 struct LeaveRoomReq {
+  // type mirrors CommandType for validation/routing.
   Protocol::CommandType type;
   std::string uid;
 
@@ -102,15 +111,25 @@ struct LeaveRoomReq {
 };
 
 struct ListRoomsReq {
+  // type mirrors CommandType for validation/routing.
   Protocol::CommandType type;
 
 };
 
 struct SendMessageReq {
+  // type mirrors CommandType for validation/routing.
   Protocol::CommandType type;
   std::string content;
 
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(SendMessageReq, type, content)
+};
+
+struct HeartbeatReq {
+  // type mirrors CommandType for validation/routing.
+  Protocol::CommandType type;
+  std::string uid;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(HeartbeatReq, type, uid);
 };
 
 struct LoginRsp {
