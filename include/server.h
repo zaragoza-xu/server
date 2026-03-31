@@ -18,6 +18,7 @@ private:
   int port;
   asio::ip::tcp::acceptor acceptor;
   asio::io_context &ioContext;
+  // User and room state are shared across channels and protected by mutexes.
   std::unordered_map<std::string, std::shared_ptr<User>> users; // uid -> User
   std::unordered_map<int, std::shared_ptr<Room>> rooms; // room_id -> Room
   mutable std::mutex usersMutex;

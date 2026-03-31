@@ -20,10 +20,10 @@ protected:
   std::shared_ptr<User> user;
   std::shared_ptr<Server> server;
 
+  // Construct a uniform response envelope.
   static Protocol::Envelope make_ok_env(int code, const json &data);
   static Protocol::Envelope make_err_env(int code,
                                          const std::string &message);
-  static Protocol::CommandType parse_command_type(const json &j);
 
   Protocol::Envelope handle_register(const json &j);
   Protocol::Envelope handle_login(const json &j);
@@ -38,6 +38,7 @@ public:
   Channel(asio::io_context &context, std::shared_ptr<Server> server)
       : socket(context), server(server) {}
 
+  // Read-loop for framed JSON messages.
   asio::awaitable<void> run();
   asio::ip::tcp::socket &getSocket() { return socket; }
   std::shared_ptr<User> get_user() const { return user; }

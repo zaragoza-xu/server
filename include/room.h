@@ -33,6 +33,7 @@ public:
   void collect_members_info(
       std::vector<Protocol::PlayerBasicInfo> &PlayerInfos) const;
 
+  // Add member if not present and capacity allows.
   bool add_member(std::shared_ptr<User> user);
 
   bool remove_member(const std::string &uid) {

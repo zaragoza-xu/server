@@ -23,6 +23,7 @@ using namespace asio::ip;
 Server::Server(asio::io_context &context, int port)
     : ioContext(context), acceptor(context, tcp::endpoint(tcp::v4(), port)),
       nextRoomId(1) {
+  // Start accepting connections immediately on construction.
   asio::co_spawn(ioContext, accept_loop(), asio::detached);
 }
 
@@ -140,7 +141,7 @@ bool Server::leave_room(int room_id, const std::string &uid) {
   room->remove_member(uid);
   member->set_room_id(-1);
 
-  // Delete empty rooms
+  // Remove empty rooms to keep the registry clean.
   if (room->get_people_count() == 0) {
     rooms.erase(it);
   }
