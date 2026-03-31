@@ -1,4 +1,5 @@
 #pragma once
+#include <chrono>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -6,6 +7,7 @@
 #include <asio/awaitable.hpp>
 #include <asio/io_context.hpp>
 #include <asio/ip/tcp.hpp>
+#include <asio/steady_timer.hpp>
 
 #include "protocol.h"
 
@@ -18,8 +20,14 @@ private:
   int port;
   asio::ip::tcp::acceptor acceptor;
   asio::io_context &ioContext;
+  asio::steady_timer heartbeatTimer;
+  std::chrono::seconds heartbeatInterval{5};
+  std::chrono::seconds heartbeatTimeout{30};
   // User and room state are shared across channels and protected by mutexes.
-  std::unordered_map<std::string, std::shared_ptr<User>> users; // uid -> User
+  std::unordered_map<std::string, Protocol::PlayerBasicInfo>
+      userInfos; // uid -> profile info (persisted)
+  std::unordered_map<std::string, std::shared_ptr<User>>
+      users; // uid -> online user session
   std::unordered_map<int, std::shared_ptr<Room>> rooms; // room_id -> Room
   mutable std::mutex usersMutex;
   mutable std::mutex roomsMutex;
@@ -27,16 +35,15 @@ private:
   int nextUid = 1;
 
   asio::awaitable<void> accept_loop();
+  asio::awaitable<void> heartbeat_monitor();
 
 public:
   Server(asio::io_context &context, int port);
   ~Server() = default;
 
   // User management
-  auto register_user(const Protocol::PlayerBasicInfo info,
-                     std::shared_ptr<Channel> chl) -> std::shared_ptr<User>;
-  auto login_user(const std::string &uid,
-                  std::shared_ptr<Channel> channel) -> std::shared_ptr<User>;
+  auto register_user() -> std::shared_ptr<User>;
+  auto login_user(const std::string &uid) -> std::shared_ptr<User>;
   void logout_user(const std::string &uid);
   std::shared_ptr<User> get_user(const std::string &uid) const;
   bool user_exists(const std::string &uid) const;

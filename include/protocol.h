@@ -26,6 +26,7 @@ enum class CommandType : int {
   LIST_ROOMS = 6,
   SEND_MESSAGE = 7,
   HEARTBEAT = 8,
+  EDIT_PROFILE = 9,
   ERROR = 100
 };
 
@@ -66,12 +67,16 @@ struct Envelope {
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Envelope, code, message, data)
 };
 
+struct TestReq {
+  int type;
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(TestReq, type)
+};
+
 struct RegisterReq {
   // type mirrors CommandType for validation/routing.
   Protocol::CommandType type;
-  PlayerBasicInfo info;
 
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(RegisterReq, type, info)
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(RegisterReq, type)
 };
 
 struct LoginReq {
@@ -80,6 +85,14 @@ struct LoginReq {
   std::string uid;
 
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(LoginReq, type, uid)
+};
+
+struct EditProfileReq {
+  // type mirrors CommandType for validation/routing.
+  Protocol::CommandType type;
+  PlayerBasicInfo basicInfo;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(EditProfileReq, type, basicInfo);
 };
 
 struct CreateRoomReq {
