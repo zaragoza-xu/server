@@ -16,62 +16,34 @@ constexpr std::string_view HEADER = "CHAT";
 constexpr int HEADER_SIZE = 4;
 constexpr int MAX_MESSAGE_SIZE = 65536;
 
-// Single source of truth for command names.
-#define PROTOCOL_COMMAND_TYPE_TABLE(X) \
-  X(REGISTER, "register")             \
-  X(LOGIN, "login")                   \
-  X(CREATE_ROOM, "create_room")       \
-  X(JOIN_ROOM, "join_room")           \
-  X(LEAVE_ROOM, "leave_room")         \
-  X(LIST_ROOMS, "list_rooms")         \
-  X(SEND_MESSAGE, "send_message")
-
-enum class CommandType {
-#define X(name, str) name,
-  PROTOCOL_COMMAND_TYPE_TABLE(X)
-#undef X
+enum class CommandType : int {
+  REGISTER = 1,
+  LOGIN = 2,
+  CREATE_ROOM = 3,
+  JOIN_ROOM = 4,
+  LEAVE_ROOM = 5,
+  LIST_ROOMS = 6,
+  SEND_MESSAGE = 7,
   ERROR = 100
 };
 
-inline std::string command_type_to_string(CommandType type) {
-  switch (type) {
-#define X(name, str)   \
-  case CommandType::name: \
-    return str;
-  
-  PROTOCOL_COMMAND_TYPE_TABLE(X)
+enum Code : int {
+  SUCCESS = 1,
+  FAIL = 1 << 1,
+  ERROR = 1 << 2,
 
-#undef X
-  case CommandType::ERROR:
-  default:
-    return "error";
-  }
-}
+  // Lower bits are status flags, higher bits are detail flags.
+  TIME_OUT = 1 << 3,
+  DESERIALIZE_FAIL = 1 << 4,
+  CONNECTION_ERROR = 1 << 5,
+  BAD_REQUEST = 1 << 6,
+  NOT_FOUND = 1 << 7,
+  ROOM_STATE_ERROR = 1 << 8,
 
-inline CommandType command_type_from_string(const std::string &type) {
-#define X(name, str) \
-  if (type == str)   \
-    return CommandType::name;
-  
-  PROTOCOL_COMMAND_TYPE_TABLE(X)
-
-#undef X
-  if (type == "error")
-    return CommandType::ERROR;
-  return CommandType::ERROR;
-}
-
-inline void to_json(json &j, const CommandType &type) {
-  j = command_type_to_string(type);
-}
-
-inline void from_json(const json &j, CommandType &type) {
-  if (!j.is_string()) {
-    type = CommandType::ERROR;
-    return;
-  }
-  type = command_type_from_string(j.get<std::string>());
-}
+  SERVICE_SUCCESS = SUCCESS,
+  SERVICE_FAIL = FAIL,
+  SYSTEM_ERROR = ERROR
+};
 
 struct PlayerBasicInfo {
   std::string uid;
@@ -83,58 +55,62 @@ struct PlayerBasicInfo {
 };
 
 struct Envelope {
-  CommandType type = CommandType::ERROR;
-  bool status = false;
-  int errorCode = 0;
+  int code = 0;
   std::string message;
   json data = json::object();
 
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Envelope, type, status,
-                                              errorCode, message, data)
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Envelope, code, message, data)
 };
 
 struct RegisterReq {
+  Protocol::CommandType type;
   PlayerBasicInfo info;
 
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(RegisterReq, info)
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(RegisterReq, type, info)
 };
 
 struct LoginReq {
+  Protocol::CommandType type;
   std::string uid;
 
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(LoginReq, uid)
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(LoginReq, type, uid)
 };
 
 struct CreateRoomReq {
+  Protocol::CommandType type;
   std::string uid;
   std::string roomName;
   size_t maximumPeople = 0;
 
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(CreateRoomReq, uid, roomName,
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(CreateRoomReq, type, uid, roomName,
                                               maximumPeople)
 };
 
 struct JoinRoomReq {
+  Protocol::CommandType type;
   int roomId = -1;
   std::string uid;
 
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(JoinRoomReq, roomId, uid)
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(JoinRoomReq, type, roomId, uid)
 };
 
 struct LeaveRoomReq {
+  Protocol::CommandType type;
   std::string uid;
 
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(LeaveRoomReq, uid)
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(LeaveRoomReq, type, uid)
 };
 
 struct ListRoomsReq {
+  Protocol::CommandType type;
 
 };
 
 struct SendMessageReq {
+  Protocol::CommandType type;
   std::string content;
 
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(SendMessageReq, content)
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(SendMessageReq, type, content)
 };
 
 struct LoginRsp {
@@ -156,10 +132,10 @@ struct JoinRoomRsp {
 };
 
 struct LeaveRoomRsp {
-  PlayerBasicInfo info;
-  int roomId = -1;
+  // PlayerBasicInfo info;
+  // int roomId = -1;
 
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(LeaveRoomRsp, info, roomId)
+  // NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(LeaveRoomRsp, info, roomId)
 };
 
 struct RoomInfo {
@@ -185,7 +161,4 @@ struct SendMessagePush {
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(SendMessagePush, info, roomId,
                                               content)
 };
-
-#undef PROTOCOL_COMMAND_TYPE_TABLE
-
 } // namespace Protocol

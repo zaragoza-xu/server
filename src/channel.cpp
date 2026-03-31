@@ -104,34 +104,20 @@ asio::awaitable<void> Channel::run() {
   }
 }
 
-Protocol::Envelope Channel::make_ok_env(Protocol::CommandType type,
-                                        const json &data) {
+Protocol::Envelope Channel::make_ok_env(int code, const json &data) {
   Protocol::Envelope env;
-  env.type = type;
-  env.status = true;
-  env.errorCode = 0;
+  env.code = code;
   env.message = "ok";
   env.data = data;
   return env;
 }
 
-Protocol::Envelope Channel::make_err_env(Protocol::CommandType type,
-                                         int errorCode,
-                                         const std::string &message) {
+Protocol::Envelope Channel::make_err_env(int code, const std::string &message) {
   Protocol::Envelope env;
-  env.type = type;
-  env.status = false;
-  env.errorCode = errorCode;
+  env.code = code;
   env.message = message;
   env.data = json::object();
   return env;
-}
-
-Protocol::CommandType Channel::parse_command_type(const json &j) {
-  if (!j.contains("type") || !j["type"].is_string()) {
-    return Protocol::CommandType::ERROR;
-  }
-  return Protocol::command_type_from_string(j.value("type", "error"));
 }
 
 // handle REGISTER
@@ -143,7 +129,7 @@ Protocol::Envelope Channel::handle_register(const json &j) {
   rsp.basicInfo = req.info;
   rsp.basicInfo.uid = user->get_uid();
   std::cout << "User " << user->get_uid() << " registered" << std::endl;
-  return make_ok_env(Protocol::CommandType::REGISTER, json(rsp));
+  return make_ok_env(Protocol::SERVICE_SUCCESS, json(rsp));
 }
 
 // handle LOGIN
@@ -152,14 +138,15 @@ Protocol::Envelope Channel::handle_login(const json &j) {
   auto loggedInUser = server->login_user(req.uid, shared_from_this());
 
   if (!loggedInUser) {
-    return make_err_env(Protocol::CommandType::LOGIN, 1001, "uid not exists");
+    return make_err_env(Protocol::SERVICE_FAIL | Protocol::NOT_FOUND,
+                        "uid not exists");
   }
   Protocol::LoginRsp rsp;
   rsp.basicInfo.uid = loggedInUser->get_uid();
   rsp.basicInfo.avatarType = loggedInUser->get_avatar_type();
   rsp.basicInfo.userName = loggedInUser->get_username();
   std::cout << "User " << req.uid << " logged in" << std::endl;
-  return make_ok_env(Protocol::CommandType::LOGIN, json(rsp));
+  return make_ok_env(Protocol::SERVICE_SUCCESS, json(rsp));
 }
 
 // handle CREATE_ROOM
@@ -167,11 +154,11 @@ Protocol::Envelope Channel::handle_create_room(const json &j) {
   auto req = j.get<Protocol::CreateRoomReq>();
   auto reqUser = server->get_user(req.uid);
   if (!reqUser) {
-    return make_err_env(Protocol::CommandType::CREATE_ROOM, 2001,
+    return make_err_env(Protocol::SERVICE_FAIL | Protocol::NOT_FOUND,
                         "Not logged in");
   }
   if (req.roomName.empty()) {
-    return make_err_env(Protocol::CommandType::CREATE_ROOM, 2002,
+    return make_err_env(Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST,
                         "Room name cannot be empty");
   }
 
@@ -180,71 +167,68 @@ Protocol::Envelope Channel::handle_create_room(const json &j) {
   rsp.roomId = room->get_id();
   std::cout << "Room " << req.roomName << " created with id " << room->get_id()
             << std::endl;
-  return make_ok_env(Protocol::CommandType::CREATE_ROOM, json(rsp));
+  return make_ok_env(Protocol::SERVICE_SUCCESS, json(rsp));
 }
 
 // hanlde JOIN_ROOM
 Protocol::Envelope Channel::handle_join_room(const json &j) {
   auto req = j.get<Protocol::JoinRoomReq>();
   auto reqUser = server->get_user(req.uid);
-  if (!reqUser) {
-    return make_err_env(Protocol::CommandType::JOIN_ROOM, 3001,
+  if (!reqUser)
+    return make_err_env(Protocol::SERVICE_FAIL | Protocol::NOT_FOUND,
                         "Not logged in");
-  }
 
   auto room = server->get_room(req.roomId);
-  if (!room) {
-    return make_err_env(Protocol::CommandType::JOIN_ROOM, 3003,
+  if (!room)
+    return make_err_env(Protocol::SERVICE_FAIL | Protocol::NOT_FOUND,
                         "Room does not exist");
-  }
-  if (!server->join_room(room, reqUser)) {
-    return make_err_env(Protocol::CommandType::JOIN_ROOM, 3004,
+  if (!server->join_room(room, reqUser))
+    return make_err_env(Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR,
                         "Failed to join room");
-  }
 
   Protocol::JoinRoomRsp rsp;
   room->collect_members_info(rsp.PlayerInfos);
   std::cout << "User " << req.uid << " joined room " << req.roomId << std::endl;
-  return make_ok_env(Protocol::CommandType::JOIN_ROOM, json(rsp));
+  return make_ok_env(Protocol::SERVICE_SUCCESS, json(rsp));
 }
 
 // handle LIST_ROOMS
 Protocol::Envelope Channel::handle_list_rooms(const json &) {
   Protocol::ListRoomsRsp rsp;
   server->list_rooms(rsp.RoomInfos);
-  return make_ok_env(Protocol::CommandType::LIST_ROOMS, json(rsp));
+  return make_ok_env(Protocol::SERVICE_SUCCESS, json(rsp));
 }
 
 Protocol::Envelope Channel::handle_leave_room(const json &j) {
   auto req = j.get<Protocol::LeaveRoomReq>();
   auto reqUser = server->get_user(req.uid);
   if (!reqUser) {
-    return make_err_env(Protocol::CommandType::LEAVE_ROOM, 4001,
+    return make_err_env(Protocol::SERVICE_FAIL | Protocol::NOT_FOUND,
                         "Not logged in");
   }
   if (!reqUser->is_in_room()) {
-    return make_err_env(Protocol::CommandType::LEAVE_ROOM, 4002,
+    return make_err_env(Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR,
                         "Not in any room");
   }
 
   const int roomId = reqUser->get_room_id();
   if (!server->leave_room(roomId, reqUser->get_uid())) {
-    return make_err_env(Protocol::CommandType::LEAVE_ROOM, 4003,
+    return make_err_env(Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR,
                         "Failed to leave room");
   }
 
   std::cout << "User " << req.uid << " left room" << std::endl;
-  return make_ok_env(Protocol::CommandType::LEAVE_ROOM, json::object());
+  return make_ok_env(Protocol::SERVICE_SUCCESS, json::object());
 }
 
 // handle all
 asio::awaitable<void> Channel::handle_message(std::string &msg) {
   Protocol::Envelope responseEnv =
-      make_err_env(Protocol::CommandType::ERROR, -1, "Unknown error");
+      make_err_env(Protocol::SYSTEM_ERROR, "Unknown error");
 
   try {
     auto j = json::parse(msg);
-    Protocol::CommandType type = parse_command_type(j);
+    Protocol::CommandType type = j.value("type", Protocol::CommandType::ERROR);
 
     switch (type) {
     case Protocol::CommandType::REGISTER: {
@@ -272,12 +256,13 @@ asio::awaitable<void> Channel::handle_message(std::string &msg) {
       break;
     }
     default:
-      responseEnv =
-          make_err_env(Protocol::CommandType::ERROR, 9001, "Unknown command");
+      responseEnv = make_err_env(Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST,
+                                 "Unknown command");
     }
   } catch (const std::exception &e) {
     responseEnv =
-        make_err_env(Protocol::CommandType::ERROR, 9002, std::string(e.what()));
+        make_err_env(Protocol::SYSTEM_ERROR | Protocol::DESERIALIZE_FAIL,
+                     std::string(e.what()));
   }
 
   // Send response outside try-catch to avoid co_await issue

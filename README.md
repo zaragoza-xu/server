@@ -17,7 +17,8 @@
 
 - 消息类型 `type` 使用字符串（例如 `"login"`、`"create_room"`）
 - 信封字段使用 `data` 承载业务数据
-- 统一返回结构由 `Envelope` 描述（`type/status/errorCode/message/data`）
+- 统一返回结构由 `Envelope` 描述（`code/message/data`）
+- `code` 使用位掩码：低位表示成功/失败/系统错误，高位表示具体错误细节
 
 ## 目录概览
 
