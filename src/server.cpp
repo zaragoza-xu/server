@@ -1,5 +1,6 @@
 #include "server.h"
 #include <cstddef>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -13,7 +14,7 @@
 #include <asio/use_awaitable.hpp>
 
 #include "channel.h"
-#include "logging.h"
+#include "error.h"
 #include "protocol.h"
 #include "room.h"
 #include "user.h"
@@ -37,7 +38,7 @@ asio::awaitable<void> Server::accept_loop() {
         chl->getSocket(), asio::redirect_error(asio::use_awaitable, ec));
 
     if (ec) {
-      logging::log("%s\n", ec.message());
+      log("%s\n", ec.message());
       continue;
     }
     std::cout << "accepted connection" << std::endl;
