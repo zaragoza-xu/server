@@ -1,9 +1,7 @@
 #include "channel.h"
 
 #include <cstddef>
-#include <iostream>
 #include <memory>
-#include <mutex>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <system_error>
@@ -14,7 +12,7 @@
 #include <asio/use_awaitable.hpp>
 #include <asio/write.hpp>
 
-#include "error.h"
+#include "logging.h"
 #include "protocol.h"
 #include "room.h"
 #include "server.h"
@@ -58,7 +56,7 @@ asio::awaitable<void> Channel::run() {
     std::size_t len = co_await socket.async_read_some(
         asio::buffer(buf), asio::redirect_error(asio::use_awaitable, ec));
     if (ec) {
-      log("Connection closed: %s\n", ec.message());
+      logging::log("Connection closed: {}\n", ec.message());
       co_return;
     }
 
@@ -76,7 +74,7 @@ asio::awaitable<void> Channel::run() {
       }
 
       if (delimPos > Protocol::MAX_MESSAGE_SIZE) {
-        log("Invalid payload length: %zu\n", delimPos);
+        logging::log("Invalid payload length: {}\n", delimPos);
         co_return;
       }
 
@@ -84,14 +82,14 @@ asio::awaitable<void> Channel::run() {
       if (!msg.empty() && msg.back() == '\r') {
         msg.pop_back();
       }
-      std::cout << "Received: " << msg << std::endl;
+      logging::log("Received: {}\n", msg);
       pending.erase(0, delimPos + 1);
 
       co_await handle_message(msg);
     }
 
     if (pending.size() > Protocol::MAX_MESSAGE_SIZE + 1) {
-      log("Payload without delimiter is too large: %zu\n", pending.size());
+      logging::log("Payload without delimiter is too large: %zu\n", pending.size());
       co_return;
     }
   }
@@ -117,7 +115,7 @@ Protocol::Envelope Channel::make_err_env(int code, const std::string &message) {
 Protocol::Envelope Channel::handle_register(const json &j) {
   auto req = j.get<Protocol::RegisterReq>();
   auto user = server->register_user();
-  std::cout << "User " << user->get_uid() << " registered" << std::endl;
+  logging::log("User {} registered", user->get_uid());
   return make_ok_env(Protocol::SERVICE_SUCCESS, json::object());
 }
 
@@ -134,7 +132,7 @@ Protocol::Envelope Channel::handle_login(const json &j) {
   rsp.basicInfo.uid = loggedInUser->get_uid();
   rsp.basicInfo.avatarType = loggedInUser->get_avatar_type();
   rsp.basicInfo.userName = loggedInUser->get_username();
-  std::cout << "User " << req.uid << " logged in" << std::endl;
+  logging::log("User {} logged in", loggedInUser->get_uid());
   return make_ok_env(Protocol::SERVICE_SUCCESS, json(rsp));
 }
 
@@ -154,8 +152,7 @@ Protocol::Envelope Channel::handle_create_room(const json &j) {
   auto room = server->create_room(req.roomName, req.maximumPeople, reqUser);
   Protocol::CreateRoomRsp rsp;
   rsp.roomId = room->get_id();
-  std::cout << "Room " << req.roomName << " created with id " << room->get_id()
-            << std::endl;
+  logging::log("Room {} created", room->get_id());
   return make_ok_env(Protocol::SERVICE_SUCCESS, json(rsp));
 }
 
@@ -177,7 +174,7 @@ Protocol::Envelope Channel::handle_join_room(const json &j) {
 
   Protocol::JoinRoomRsp rsp;
   room->collect_members_info(rsp.PlayerInfos);
-  std::cout << "User " << req.uid << " joined room " << req.roomId << std::endl;
+  logging::log("User {} joined room {}", reqUser->get_uid(), reqUser->get_room_id());
   return make_ok_env(Protocol::SERVICE_SUCCESS, json(rsp));
 }
 
@@ -206,7 +203,7 @@ Protocol::Envelope Channel::handle_leave_room(const json &j) {
                         "Failed to leave room");
   }
 
-  std::cout << "User " << req.uid << " left room" << std::endl;
+  logging::log("User {} left room", reqUser->get_uid());
   return make_ok_env(Protocol::SERVICE_SUCCESS, json::object());
 }
 
@@ -284,7 +281,7 @@ asio::awaitable<void> Channel::handle_message(std::string &msg) {
   // Send response outside try-catch to avoid co_await issue
   bool sent = co_await send_message(json(responseEnv).dump());
   if (!sent) {
-    log("Failed to send response\n");
+    logging::log("Failed to send response");
     co_return;
   }
 }
