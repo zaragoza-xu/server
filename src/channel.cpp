@@ -1,9 +1,7 @@
 #include "channel.h"
 
 #include <cstddef>
-#include <iostream>
 #include <memory>
-#include <mutex>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <system_error>
@@ -14,7 +12,7 @@
 #include <asio/use_awaitable.hpp>
 #include <asio/write.hpp>
 
-#include "error.h"
+#include "logging.h"
 #include "protocol.h"
 #include "room.h"
 #include "server.h"
@@ -58,7 +56,7 @@ asio::awaitable<void> Channel::run() {
     std::size_t len = co_await socket.async_read_some(
         asio::buffer(buf), asio::redirect_error(asio::use_awaitable, ec));
     if (ec) {
-      log("Connection closed: %s\n", ec.message());
+      logging::log("Connection closed: {}\n", ec.message());
       co_return;
     }
 
@@ -76,7 +74,7 @@ asio::awaitable<void> Channel::run() {
       }
 
       if (delimPos > Protocol::MAX_MESSAGE_SIZE) {
-        log("Invalid payload length: %zu\n", delimPos);
+        logging::log("Invalid payload length: {}\n", delimPos);
         co_return;
       }
 
@@ -84,14 +82,14 @@ asio::awaitable<void> Channel::run() {
       if (!msg.empty() && msg.back() == '\r') {
         msg.pop_back();
       }
-      std::cout << "Received: " << msg << std::endl;
+      logging::log("Received: {}\n", msg);
       pending.erase(0, delimPos + 1);
 
       co_await handle_message(msg);
     }
 
     if (pending.size() > Protocol::MAX_MESSAGE_SIZE + 1) {
-      log("Payload without delimiter is too large: %zu\n", pending.size());
+      logging::log("Payload without delimiter is too large: %zu\n", pending.size());
       co_return;
     }
   }
@@ -284,7 +282,7 @@ asio::awaitable<void> Channel::handle_message(std::string &msg) {
   // Send response outside try-catch to avoid co_await issue
   bool sent = co_await send_message(json(responseEnv).dump());
   if (!sent) {
-    log("Failed to send response\n");
+    logging::log("Failed to send response\n");
     co_return;
   }
 }
