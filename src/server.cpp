@@ -3,6 +3,7 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include <asio/awaitable.hpp>
@@ -22,8 +23,10 @@ using namespace asio::ip;
 
 Server::Server(asio::io_context &context, int port)
     : ioContext(context), acceptor(context, tcp::endpoint(tcp::v4(), port)),
-      nextRoomId(1) {
+      heartbeatTimer(context), nextRoomId(1) {
+  // Start accepting connections immediately on construction.
   asio::co_spawn(ioContext, accept_loop(), asio::detached);
+  asio::co_spawn(ioContext, heartbeat_monitor(), asio::detached);
 }
 
 asio::awaitable<void> Server::accept_loop() {
@@ -45,35 +48,53 @@ asio::awaitable<void> Server::accept_loop() {
   }
 }
 
-auto Server::register_user(const Protocol::PlayerBasicInfo info,
-                           std::shared_ptr<Channel> chl)
-    -> std::shared_ptr<User> {
+auto Server::register_user() -> std::shared_ptr<User> {
   std::lock_guard<std::mutex> lock(usersMutex);
-  auto user =
-      std::make_shared<User>(++nextUid, info.userName, chl, info.avatarType);
-  users[user->get_uid()] = user;
-  chl->set_user(user);
+
+  Protocol::PlayerBasicInfo storedInfo = {"", "", 0};
+  storedInfo.uid = std::to_string(nextUid++);
+  userInfos[storedInfo.uid] = storedInfo;
+
+  auto user = std::make_shared<User>(storedInfo.uid, storedInfo.userName,
+                                     storedInfo.avatarType);
+  users[storedInfo.uid] = user;
   return user;
 }
 
-auto Server::login_user(const std::string &uid,
-                        std::shared_ptr<Channel> chl) -> std::shared_ptr<User> {
+auto Server::login_user(const std::string &uid) -> std::shared_ptr<User> {
   std::lock_guard<std::mutex> lock(usersMutex);
-  auto it = users.find(uid);
-  if (it != users.end()) {
-    chl->set_user(it->second);
-    return it->second;
+  auto infoIt = userInfos.find(uid);
+  if (infoIt == userInfos.end()) {
+    return nullptr;
   }
-  return nullptr;
+
+  auto onlineIt = users.find(uid);
+  if (onlineIt != users.end()) {
+    auto user = onlineIt->second;
+    if (user) {
+      user->touch_heartbeat();
+    }
+    return user;
+  }
+
+  const auto &info = infoIt->second;
+  auto user = std::make_shared<User>(info.uid, info.userName, info.avatarType);
+  users[uid] = user;
+  return user;
 }
 
 void Server::logout_user(const std::string &uid) {
-  std::lock_guard<std::mutex> lock(usersMutex);
-  auto it = users.find(uid);
-  if (it == users.end()) {
-    return;
+  std::shared_ptr<User> user;
+  {
+    std::lock_guard<std::mutex> lock(usersMutex);
+    auto it = users.find(uid);
+    if (it == users.end()) {
+      return;
+    }
+    user = it->second;
+    users.erase(it);
   }
-  std::shared_ptr<User> user = it->second;
+
   if (user && user->is_in_room()) {
     leave_room(user->get_room_id(), uid);
   }
@@ -90,7 +111,7 @@ std::shared_ptr<User> Server::get_user(const std::string &uid) const {
 
 bool Server::user_exists(const std::string &uid) const {
   std::lock_guard<std::mutex> lock(usersMutex);
-  return users.count(uid) > 0;
+  return userInfos.count(uid) > 0;
 }
 
 std::shared_ptr<Room> Server::create_room(const std::string &roomName,
@@ -140,7 +161,7 @@ bool Server::leave_room(int room_id, const std::string &uid) {
   room->remove_member(uid);
   member->set_room_id(-1);
 
-  // Delete empty rooms
+  // Remove empty rooms to keep the registry clean.
   if (room->get_people_count() == 0) {
     rooms.erase(it);
   }
@@ -155,6 +176,36 @@ void Server::list_rooms(std::vector<Protocol::RoomInfo> &roomInfos) const {
     roomInfos.push_back({.roomId = id,
                          .maximumPeople = room->get_maximum_people(),
                          .peopleCount = room->get_people_count()});
+  }
+}
+
+asio::awaitable<void> Server::heartbeat_monitor() {
+  while (true) {
+    heartbeatTimer.expires_after(heartbeatInterval);
+    std::error_code ec;
+    co_await heartbeatTimer.async_wait(
+        asio::redirect_error(asio::use_awaitable, ec));
+    if (ec) {
+      continue;
+    }
+
+    std::vector<std::string> expired;
+    const auto now = std::chrono::steady_clock::now();
+    {
+      std::lock_guard<std::mutex> lock(usersMutex);
+      for (const auto &[uid, user] : users) {
+        if (!user) {
+          continue;
+        }
+        if (now - user->get_last_heartbeat() > heartbeatTimeout) {
+          expired.push_back(uid);
+        }
+      }
+    }
+
+    for (const auto &uid : expired) {
+      logout_user(uid);
+    }
   }
 }
 

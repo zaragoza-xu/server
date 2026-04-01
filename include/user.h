@@ -1,6 +1,6 @@
 #pragma once
 
-#include <memory>
+#include <chrono>
 #include <string>
 
 class Channel;
@@ -9,18 +9,16 @@ class User {
 private:
   int avatarType;
   std::string userName;
-  std::shared_ptr<Channel> channel;
   int roomId;
   std::string uid;
+  std::chrono::steady_clock::time_point lastHeartbeat;
 
 public:
-  User(int uid, const std::string &userName,
-       std::shared_ptr<Channel> channel, int avatarType = 0)
-      : avatarType(avatarType), userName(userName), channel(channel),
-        roomId(-1), uid(std::to_string(uid)) {}
+  User(const std::string &uid, const std::string &userName, int avatarType = 0)
+      : avatarType(avatarType), userName(userName), roomId(-1), uid(uid),
+        lastHeartbeat(std::chrono::steady_clock::now()) {}
 
   const std::string &get_username() const { return userName; }
-  std::shared_ptr<Channel> get_channel() const { return channel; }
   int get_avatar_type() const { return avatarType; }
   const std::string &get_uid() const { return uid; }
 
@@ -28,4 +26,9 @@ public:
   void set_room_id(int roomId) { this->roomId = roomId; }
 
   bool is_in_room() const { return roomId != -1; }
+
+  void touch_heartbeat() { lastHeartbeat = std::chrono::steady_clock::now(); }
+  std::chrono::steady_clock::time_point get_last_heartbeat() const {
+    return lastHeartbeat;
+  }
 };

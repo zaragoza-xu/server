@@ -14,16 +14,15 @@
 
 每个响应必须包含以下字段：
 
-- `type`
-- `status`
-- `errorCode`
+- `code`
 - `message`
 - `data`
 
 断言建议：
 
-- 成功：`status=true` 且 `errorCode=0`
-- 失败：`status=false` 且 `errorCode!=0` 且 `message` 非空
+- 成功：`code & SUCCESS` 非 0
+- 业务失败：`code & FAIL` 非 0，且 `message` 非空
+- 系统错误：`code & ERROR` 非 0，细节位（如 `DESERIALIZE_FAIL`）符合预期
 
 ### 3. 注册/登录主流程
 
@@ -90,7 +89,7 @@
 ### 1. 快照回归
 
 - 每个命令建立固定输入与固定响应结构快照
-- 重点字段：`type/status/errorCode/message/data`
+- 重点字段：`code/message/data`
 
 ### 2. 契约一致性
 

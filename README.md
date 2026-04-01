@@ -17,7 +17,8 @@
 
 - 消息类型 `type` 使用字符串（例如 `"login"`、`"create_room"`）
 - 信封字段使用 `data` 承载业务数据
-- 统一返回结构由 `Envelope` 描述（`type/status/errorCode/message/data`）
+- 统一返回结构由 `Envelope` 描述（`code/message/data`）
+- `code` 使用位掩码：低位表示成功/失败/系统错误，高位表示具体错误细节
 
 ## 目录概览
 
@@ -32,10 +33,19 @@
 - CMake 3.21+
 - C++20 编译器
 - Ninja（推荐）
-- vcpkg（当前 preset 默认使用）
 - 库依赖：
   - `asio`
   - `nlohmann_json`
+  - `GTest`（仅单元测试需要）
+
+说明：
+
+- 默认开启 `SERVER_FETCH_DEPS=ON`，在本机缺少依赖时，CMake 会自动下载并集成这些库。
+- 如果你已经通过系统包管理器或 vcpkg 安装了依赖，可关闭自动下载：
+
+```bash
+cmake -S . -B build -DSERVER_FETCH_DEPS=OFF
+```
 
 ## 构建方式
 
@@ -44,6 +54,13 @@
 ```bash
 cmake --preset release
 cmake --build build
+```
+
+如果你希望继续使用 vcpkg 工具链 preset：
+
+```bash
+cmake --preset release-vcpkg
+cmake --build --preset release-vcpkg
 ```
 
 ### 方式二：使用脚本
@@ -65,6 +82,21 @@ cmake --build build
 ```bash
 cmake -S . -B build
 cmake --build build
+```
+
+## 单元测试
+
+构建（默认会构建 `unit_tests`）：
+
+```bash
+cmake --preset release
+cmake --build build --target unit_tests
+```
+
+运行：
+
+```bash
+ctest --test-dir build --output-on-failure
 ```
 
 ## 运行
