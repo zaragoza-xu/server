@@ -48,7 +48,7 @@ asio::awaitable<void> Server::accept_loop() {
 }
 
 auto Server::register_user() -> std::shared_ptr<User> {
-  std::lock_guard<std::mutex> lock(usersMutex);
+  std::scoped_lock lock(usersMutex, userInfosMutex);
 
   Protocol::PlayerBasicInfo storedInfo = {"", "", 0};
   storedInfo.uid = std::to_string(nextUid++);
@@ -61,7 +61,7 @@ auto Server::register_user() -> std::shared_ptr<User> {
 }
 
 auto Server::login_user(const std::string &uid) -> std::shared_ptr<User> {
-  std::lock_guard<std::mutex> lock(usersMutex);
+  std::scoped_lock lock(usersMutex, userInfosMutex);
   auto infoIt = userInfos.find(uid);
   if (infoIt == userInfos.end()) {
     return nullptr;
@@ -109,16 +109,15 @@ std::shared_ptr<User> Server::get_user(const std::string &uid) const {
 }
 
 bool Server::user_exists(const std::string &uid) const {
-  std::lock_guard<std::mutex> lock(usersMutex);
+  std::lock_guard<std::mutex> lock(userInfosMutex);
   return userInfos.count(uid) > 0;
 }
 
-std::shared_ptr<Room> Server::create_room(const std::string &roomName,
-                                          const size_t maximumPeople,
+std::shared_ptr<Room> Server::create_room(const size_t maximumPeople,
                                           std::shared_ptr<User> user) {
   std::lock_guard<std::mutex> lock(roomsMutex);
   int room_id = nextRoomId++;
-  auto room = std::make_shared<Room>(room_id, roomName, maximumPeople, user);
+  auto room = std::make_shared<Room>(room_id, maximumPeople, user);
   rooms[room_id] = room;
   user->set_room_id(room_id);
   return room;

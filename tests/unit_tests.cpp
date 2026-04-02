@@ -57,13 +57,12 @@ std::shared_ptr<Server> ServerChannelBehaviorTest::server;
 TEST(ProtocolTest, CommandTypeMapping) {
   using Protocol::CommandType;
 
-  EXPECT_EQ(static_cast<int>(CommandType::REGISTER), 1);
-  EXPECT_EQ(static_cast<int>(CommandType::LOGIN), 2);
-  EXPECT_EQ(static_cast<int>(CommandType::CREATE_ROOM), 3);
-  EXPECT_EQ(static_cast<int>(CommandType::JOIN_ROOM), 4);
-  EXPECT_EQ(static_cast<int>(CommandType::LEAVE_ROOM), 5);
-  EXPECT_EQ(static_cast<int>(CommandType::LIST_ROOMS), 6);
-  EXPECT_EQ(static_cast<int>(CommandType::SEND_MESSAGE), 7);
+  EXPECT_EQ(static_cast<int>(CommandType::LOGIN), 0);
+  EXPECT_EQ(static_cast<int>(CommandType::CREATE_ROOM), 1);
+  EXPECT_EQ(static_cast<int>(CommandType::JOIN_ROOM), 2);
+  EXPECT_EQ(static_cast<int>(CommandType::LEAVE_ROOM), 3);
+  EXPECT_EQ(static_cast<int>(CommandType::LIST_ROOMS), 4);
+  EXPECT_EQ(static_cast<int>(CommandType::SEND_MESSAGE), 5);
   EXPECT_EQ(static_cast<int>(CommandType::ERROR), 100);
 }
 
@@ -87,13 +86,11 @@ TEST(ProtocolTest, EnvelopeJsonRoundTrip) {
 TEST(ProtocolTest, RequestResponseJsonRoundTrip) {
   Protocol::CreateRoomReq req;
   req.uid = "1001";
-  req.roomName = "test-room";
   req.maximumPeople = 6;
 
   json reqJson = req;
   auto reqParsed = reqJson.get<Protocol::CreateRoomReq>();
   EXPECT_EQ(reqParsed.uid, "1001");
-  EXPECT_EQ(reqParsed.roomName, "test-room");
   EXPECT_EQ(reqParsed.maximumPeople, 6);
 
   Protocol::PlayerBasicInfo p1{"1001", "alice", 1};
@@ -110,10 +107,9 @@ TEST(ProtocolTest, RequestResponseJsonRoundTrip) {
 
 TEST(RoomTest, BasicBehavior) {
   auto creator = std::make_shared<User>("1", "creator", 1);
-  Room room(10, "r1", 2, creator);
+  Room room(10, 2, creator);
 
   EXPECT_EQ(room.get_id(), 10);
-  EXPECT_EQ(room.get_name(), "r1");
   EXPECT_EQ(room.get_creator()->get_uid(), "1");
   EXPECT_EQ(room.get_maximum_people(), 2);
   EXPECT_EQ(room.get_people_count(), 1);
@@ -147,7 +143,7 @@ TEST_F(ServerChannelBehaviorTest, ServerRegisterLoginAndRoomLifecycle) {
   ASSERT_NE(loggedIn, nullptr);
   EXPECT_EQ(loggedIn->get_uid(), alice->get_uid());
 
-  auto room = server->create_room("room-server", 2, alice);
+  auto room = server->create_room(2, alice);
   ASSERT_NE(room, nullptr);
   EXPECT_EQ(alice->get_room_id(), room->get_id());
 
@@ -188,8 +184,8 @@ TEST_F(ServerChannelBehaviorTest, ChannelParsesTypeAndBuildsEnvelope) {
 }
 
 TEST_F(ServerChannelBehaviorTest, ChannelHandlerFlow) {
-  Protocol::RegisterReq registerReq;
-  registerReq.type = Protocol::CommandType::REGISTER;
+  Protocol::LoginReq registerReq;
+  registerReq.type = Protocol::CommandType::LOGIN;
   auto registerEnv = ch1->handle_register(json(registerReq));
   ASSERT_EQ(registerEnv.code, Protocol::SERVICE_SUCCESS);
   EXPECT_TRUE(registerEnv.data.is_object());
@@ -215,7 +211,6 @@ TEST_F(ServerChannelBehaviorTest, ChannelHandlerFlow) {
   Protocol::CreateRoomReq createReq;
   createReq.type = Protocol::CommandType::CREATE_ROOM;
   createReq.uid = alice->get_uid();
-  createReq.roomName = "room-channel";
   createReq.maximumPeople = 2;
   auto createEnv = ch1->handle_create_room(json(createReq));
   ASSERT_EQ(createEnv.code, Protocol::SERVICE_SUCCESS);

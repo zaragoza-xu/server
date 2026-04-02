@@ -17,17 +17,14 @@ class Room {
 private:
   int roomId;
   size_t maximumPeople;
-  std::string roomName;
   std::shared_ptr<User> creator;
   std::unordered_map<std::string, std::shared_ptr<User>> members;
   mutable std::mutex roomMutex;
 
 public:
-  Room(int roomId, const std::string &roomName, size_t maximumPeople,
-       std::shared_ptr<User> creator);
+  Room(int roomId, size_t maximumPeople, std::shared_ptr<User> creator);
 
   int get_id() const { return roomId; }
-  const std::string &get_name() const { return roomName; }
   std::shared_ptr<User> get_creator() const { return creator; }
 
   void collect_members_info(

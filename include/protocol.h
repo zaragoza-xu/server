@@ -18,15 +18,14 @@ constexpr int MAX_MESSAGE_SIZE = 65536;
 
 enum class CommandType : int {
   // Numeric command identifiers used in the JSON "type" field.
-  REGISTER = 1,
-  LOGIN = 2,
-  CREATE_ROOM = 3,
-  JOIN_ROOM = 4,
-  LEAVE_ROOM = 5,
-  LIST_ROOMS = 6,
-  SEND_MESSAGE = 7,
-  HEARTBEAT = 8,
-  EDIT_PROFILE = 9,
+  LOGIN,
+  CREATE_ROOM,
+  JOIN_ROOM,
+  LEAVE_ROOM,
+  LIST_ROOMS,
+  SEND_MESSAGE,
+  HEARTBEAT,
+  EDIT_PROFILE,
   ERROR = 100
 };
 
@@ -67,20 +66,7 @@ struct Envelope {
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Envelope, code, message, data)
 };
 
-struct TestReq {
-  int type;
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(TestReq, type)
-};
-
-struct RegisterReq {
-  // type mirrors CommandType for validation/routing.
-  Protocol::CommandType type;
-
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(RegisterReq, type)
-};
-
 struct LoginReq {
-  // type mirrors CommandType for validation/routing.
   Protocol::CommandType type;
   std::string uid;
 
@@ -88,7 +74,6 @@ struct LoginReq {
 };
 
 struct EditProfileReq {
-  // type mirrors CommandType for validation/routing.
   Protocol::CommandType type;
   PlayerBasicInfo basicInfo;
 
@@ -96,18 +81,15 @@ struct EditProfileReq {
 };
 
 struct CreateRoomReq {
-  // type mirrors CommandType for validation/routing.
   Protocol::CommandType type;
   std::string uid;
-  std::string roomName;
   size_t maximumPeople = 0;
 
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(CreateRoomReq, type, uid, roomName,
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(CreateRoomReq, type, uid,
                                               maximumPeople)
 };
 
 struct JoinRoomReq {
-  // type mirrors CommandType for validation/routing.
   Protocol::CommandType type;
   int roomId = -1;
   std::string uid;
@@ -116,7 +98,6 @@ struct JoinRoomReq {
 };
 
 struct LeaveRoomReq {
-  // type mirrors CommandType for validation/routing.
   Protocol::CommandType type;
   std::string uid;
 
@@ -124,13 +105,11 @@ struct LeaveRoomReq {
 };
 
 struct ListRoomsReq {
-  // type mirrors CommandType for validation/routing.
   Protocol::CommandType type;
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(ListRoomsReq, type)
 };
 
 struct SendMessageReq {
-  // type mirrors CommandType for validation/routing.
   Protocol::CommandType type;
   std::string content;
 
@@ -138,7 +117,6 @@ struct SendMessageReq {
 };
 
 struct HeartbeatReq {
-  // type mirrors CommandType for validation/routing.
   Protocol::CommandType type;
   std::string uid;
 
