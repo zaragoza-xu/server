@@ -56,7 +56,7 @@ asio::awaitable<void> Channel::run() {
     std::size_t len = co_await socket.async_read_some(
         asio::buffer(buf), asio::redirect_error(asio::use_awaitable, ec));
     if (ec) {
-      logging::log("Connection closed: {}\n", ec.message());
+      logging::log("Connection closed: {}", ec.message());
       co_return;
     }
 
@@ -74,7 +74,7 @@ asio::awaitable<void> Channel::run() {
       }
 
       if (delimPos > Protocol::MAX_MESSAGE_SIZE) {
-        logging::log("Invalid payload length: {}\n", delimPos);
+        logging::log("Invalid payload length: {}", delimPos);
         co_return;
       }
 
@@ -82,14 +82,15 @@ asio::awaitable<void> Channel::run() {
       if (!msg.empty() && msg.back() == '\r') {
         msg.pop_back();
       }
-      logging::log("Received: {}\n", msg);
+      logging::log("Received: {}", msg);
       pending.erase(0, delimPos + 1);
 
       co_await handle_message(msg);
     }
 
     if (pending.size() > Protocol::MAX_MESSAGE_SIZE + 1) {
-      logging::log("Payload without delimiter is too large: %zu\n", pending.size());
+      logging::log("Payload without delimiter is too large: {}",
+                   pending.size());
       co_return;
     }
   }
@@ -113,26 +114,25 @@ Protocol::Envelope Channel::make_err_env(int code, const std::string &message) {
 
 // handle REGISTER
 Protocol::Envelope Channel::handle_register(const json &j) {
-  auto req = j.get<Protocol::RegisterReq>();
+  auto req = j.get<Protocol::LoginReq>();
   auto user = server->register_user();
   logging::log("User {} registered", user->get_uid());
-  return make_ok_env(Protocol::SERVICE_SUCCESS, json(Protocol::RegisterRsp{user->get_uid()}));
+  return make_ok_env(Protocol::SERVICE_SUCCESS,
+                     json(Protocol::RegisterRsp{user->get_uid()}));
 }
 
 // handle LOGIN
 Protocol::Envelope Channel::handle_login(const json &j) {
   auto req = j.get<Protocol::LoginReq>();
-  auto loggedInUser = server->login_user(req.uid);
+  auto reqUser = server->login_user(req.uid);
 
-  if (!loggedInUser) {
+  if (!reqUser) {
     return make_err_env(Protocol::SERVICE_FAIL | Protocol::NOT_FOUND,
                         "uid not exists");
   }
   Protocol::LoginRsp rsp;
-  rsp.basicInfo.uid = loggedInUser->get_uid();
-  rsp.basicInfo.avatarType = loggedInUser->get_avatar_type();
-  rsp.basicInfo.userName = loggedInUser->get_username();
-  logging::log("User {} logged in", loggedInUser->get_uid());
+  rsp.basicInfo = reqUser->get_info();
+  logging::log("User {} logged in", reqUser->get_uid());
   return make_ok_env(Protocol::SERVICE_SUCCESS, json(rsp));
 }
 
@@ -144,12 +144,8 @@ Protocol::Envelope Channel::handle_create_room(const json &j) {
     return make_err_env(Protocol::SERVICE_FAIL | Protocol::NOT_FOUND,
                         "Not logged in");
   }
-  if (req.roomName.empty()) {
-    return make_err_env(Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST,
-                        "Room name cannot be empty");
-  }
 
-  auto room = server->create_room(req.roomName, req.maximumPeople, reqUser);
+  auto room = server->create_room(req.maximumPeople, reqUser);
   Protocol::CreateRoomRsp rsp;
   rsp.roomId = room->get_id();
   logging::log("Room {} created", room->get_id());
@@ -174,7 +170,7 @@ Protocol::Envelope Channel::handle_join_room(const json &j) {
 
   Protocol::JoinRoomRsp rsp;
   room->collect_members_info(rsp.PlayerInfos);
-  logging::log("User {} joined room {}", reqUser->get_uid(), reqUser->get_room_id());
+  logging::log("User {} joined room {}", req.uid, req.roomId);
   return make_ok_env(Protocol::SERVICE_SUCCESS, json(rsp));
 }
 
@@ -203,7 +199,7 @@ Protocol::Envelope Channel::handle_leave_room(const json &j) {
                         "Failed to leave room");
   }
 
-  logging::log("User {} left room", reqUser->get_uid());
+  logging::log("User {} left room", req.uid);
   return make_ok_env(Protocol::SERVICE_SUCCESS, json::object());
 }
 
@@ -236,12 +232,11 @@ asio::awaitable<void> Channel::handle_message(std::string &msg) {
     Protocol::CommandType type = j.value("type", Protocol::CommandType::ERROR);
 
     switch (type) {
-    case Protocol::CommandType::REGISTER: {
-      responseEnv = handle_register(j);
-      break;
-    }
     case Protocol::CommandType::LOGIN: {
-      responseEnv = handle_login(j);
+      if (j.value("uid", "") == "")
+        responseEnv = handle_register(j); // register if uid is empty
+      else
+        responseEnv = handle_login(j);
       break;
     }
     case Protocol::CommandType::CREATE_ROOM: {

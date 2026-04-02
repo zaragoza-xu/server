@@ -5,11 +5,9 @@
 #include "protocol.h"
 #include "user.h"
 
-Room::Room(int roomId, const std::string &roomName, size_t maximumPeople,
-           std::shared_ptr<User> creator)
-    : roomId(roomId), maximumPeople(maximumPeople), roomName(roomName),
-      creator(creator) {
-  members[creator->get_uid()] = creator;
+Room::Room(int roomId, size_t maximumPeople, std::shared_ptr<User> creator)
+    : roomId(roomId), maximumPeople(maximumPeople), creator(creator) {
+  members.emplace(creator->get_uid(), creator);
 }
 
 void Room::collect_members_info(
@@ -18,9 +16,7 @@ void Room::collect_members_info(
   PlayerInfos.clear();
   PlayerInfos.reserve(members.size());
   for (auto &[uid, user] : members) {
-    PlayerInfos.push_back({.uid = uid,
-                           .userName = user->get_username(),
-                           .avatarType = user->get_avatar_type()});
+    PlayerInfos.push_back(user->get_info());
   }
 }
 
@@ -31,6 +27,6 @@ bool Room::add_member(std::shared_ptr<User> user) {
   }
   if (members.size() >= maximumPeople)
     return false; // room is full
-  members[user->get_uid()] = user;
+  members.emplace(user->get_uid(), user);
   return true;
 }
