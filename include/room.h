@@ -7,11 +7,9 @@
 #include <unordered_map>
 #include <vector>
 
-class User;
+#include "protocol.h"
 
-namespace Protocol {
-struct PlayerBasicInfo;
-}
+class User;
 
 class Room {
 private:
