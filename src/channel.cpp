@@ -1,5 +1,7 @@
 #include "channel.h"
 
+#include <algorithm>
+#include <array>
 #include <cstddef>
 #include <memory>
 #include <nlohmann/json.hpp>
@@ -24,27 +26,52 @@ namespace {
 
 constexpr char FRAME_DELIMITER = '\n';
 
+struct CodeMessageEntry {
+  int mask;
+  const char *message;
+};
+
+constexpr std::array<CodeMessageEntry, 5> CODE_MESSAGE_TABLE{{
+    {Protocol::NOT_FOUND, "not found"},
+    {Protocol::ROOM_STATE_ERROR, "room state error"},
+    {Protocol::BAD_REQUEST, "bad request"},
+    {Protocol::DESERIALIZE_FAIL, "deserialize failed"},
+}};
+
+std::string map_message_from_code(int code) {
+  if (code == Protocol::SERVICE_SUCCESS)
+    return "ok";
+  for (const auto &entry : CODE_MESSAGE_TABLE) {
+    if ((code & entry.mask) != 0) {
+      return entry.message;
+    }
+  }
+  return "error";
+}
+
+template <typename Req, Protocol::Envelope (Channel::*Method)(const Req &)>
+Protocol::Envelope dispatch_typed(Channel &self, const json &j) {
+  const auto req = j.get<Req>();
+  return (self.*Method)(req);
+}
 } // namespace
 
-asio::awaitable<bool> Channel::send_message(const std::string &msg) {
-  // Enforce size limits and newline framing.
-  if (msg.empty() || msg.size() > Protocol::MAX_MESSAGE_SIZE) {
-    co_return false;
-  }
-
-  std::string frame = msg;
-  if (frame.back() != FRAME_DELIMITER) {
-    frame.push_back(FRAME_DELIMITER);
-  }
-
-  if (frame.size() > Protocol::MAX_MESSAGE_SIZE + 1) {
-    co_return false;
-  }
-
-  std::error_code ec;
-  co_await asio::async_write(socket, asio::buffer(frame),
-                             asio::redirect_error(asio::use_awaitable, ec));
-  co_return !ec;
+const Channel::CommandTable &Channel::command_table() {
+  static const CommandTable table{{
+      {Protocol::CommandType::LOGIN,
+       &dispatch_typed<Protocol::LoginReq, &Channel::on_login>},
+      {Protocol::CommandType::CREATE_ROOM,
+       &dispatch_typed<Protocol::CreateRoomReq, &Channel::on_create_room>},
+      {Protocol::CommandType::JOIN_ROOM,
+       &dispatch_typed<Protocol::JoinRoomReq, &Channel::on_join_room>},
+      {Protocol::CommandType::LIST_ROOMS,
+       &dispatch_typed<Protocol::ListRoomsReq, &Channel::on_list_rooms>},
+      {Protocol::CommandType::LEAVE_ROOM,
+       &dispatch_typed<Protocol::LeaveRoomReq, &Channel::on_leave_room>},
+      {Protocol::CommandType::HEARTBEAT,
+       &dispatch_typed<Protocol::HeartbeatReq, &Channel::on_heartbeat>},
+  }};
+  return table;
 }
 
 asio::awaitable<void> Channel::run() {
@@ -64,24 +91,20 @@ asio::awaitable<void> Channel::run() {
 
     while (true) {
       const std::size_t delimPos = pending.find(FRAME_DELIMITER);
-      if (delimPos == std::string::npos) {
+      if (delimPos == std::string::npos)
         break;
-      }
-
       if (delimPos == 0) {
         pending.erase(0, 1);
         continue;
       }
-
       if (delimPos > Protocol::MAX_MESSAGE_SIZE) {
         logging::log("Invalid payload length: {}", delimPos);
         co_return;
       }
 
       std::string msg = pending.substr(0, delimPos);
-      if (!msg.empty() && msg.back() == '\r') {
+      if (!msg.empty() && msg.back() == '\r')
         msg.pop_back();
-      }
       logging::log("Received: {}", msg);
       pending.erase(0, delimPos + 1);
 
@@ -96,177 +119,110 @@ asio::awaitable<void> Channel::run() {
   }
 }
 
-Protocol::Envelope Channel::make_ok_env(int code, const json &data) {
+Protocol::Envelope Channel::make_env(int code, const json &data) {
   Protocol::Envelope env;
   env.code = code;
-  env.message = "ok";
+  env.message = map_message_from_code(code);
   env.data = data;
   return env;
 }
 
-Protocol::Envelope Channel::make_err_env(int code, const std::string &message) {
-  Protocol::Envelope env;
-  env.code = code;
-  env.message = message;
-  env.data = json::object();
-  return env;
+asio::awaitable<bool> Channel::send_message(const std::string &msg) {
+  // Enforce size limits and newline framing.
+  if (msg.empty() || msg.size() > Protocol::MAX_MESSAGE_SIZE) {
+    co_return false;
+  }
+
+  std::string frame = msg;
+  if (frame.back() != FRAME_DELIMITER) {
+    frame.push_back(FRAME_DELIMITER);
+  }
+  if (frame.size() > Protocol::MAX_MESSAGE_SIZE + 1) {
+    co_return false;
+  }
+
+  std::error_code ec;
+  co_await asio::async_write(socket, asio::buffer(frame),
+                             asio::redirect_error(asio::use_awaitable, ec));
+  co_return !ec;
 }
 
-// handle REGISTER
-Protocol::Envelope Channel::handle_register(const json &j) {
-  auto req = j.get<Protocol::LoginReq>();
-  auto user = server->register_user();
-  logging::log("User {} registered", user->get_uid());
-  return make_ok_env(Protocol::SERVICE_SUCCESS,
-                     json(Protocol::RegisterRsp{user->get_uid()}));
+// ----------------------------------------------------------------------
+
+Protocol::Envelope Channel::on_register(const Protocol::LoginReq &req) {
+  if (!req.uid.empty()) {
+    return make_env(Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST);
+  }
+
+  Protocol::RegisterRsp rsp;
+  const int code = server->register_user(rsp);
+  return make_env(code, json(rsp));
 }
 
-// handle LOGIN
-Protocol::Envelope Channel::handle_login(const json &j) {
-  auto req = j.get<Protocol::LoginReq>();
-  auto reqUser = server->login_user(req.uid);
-
-  if (!reqUser) {
-    return make_err_env(Protocol::SERVICE_FAIL | Protocol::NOT_FOUND,
-                        "uid not exists");
+Protocol::Envelope Channel::on_login(const Protocol::LoginReq &req) {
+  if (req.uid.empty()) {
+    return on_register(req);
   }
   Protocol::LoginRsp rsp;
-  rsp.basicInfo = reqUser->get_info();
-  logging::log("User {} logged in", reqUser->get_uid());
-  return make_ok_env(Protocol::SERVICE_SUCCESS, json(rsp));
+  const int code = server->login_user(req.uid, rsp);
+  return make_env(code, code == Protocol::SERVICE_SUCCESS ? json(rsp)
+                                                          : json::object());
 }
 
-// handle CREATE_ROOM
-Protocol::Envelope Channel::handle_create_room(const json &j) {
-  auto req = j.get<Protocol::CreateRoomReq>();
-  auto reqUser = server->get_user(req.uid);
-  if (!reqUser) {
-    return make_err_env(Protocol::SERVICE_FAIL | Protocol::NOT_FOUND,
-                        "Not logged in");
-  }
-
-  auto room = server->create_room(req.maximumPeople, reqUser);
+Protocol::Envelope Channel::on_create_room(const Protocol::CreateRoomReq &req) {
   Protocol::CreateRoomRsp rsp;
-  rsp.roomId = room->get_id();
-  logging::log("Room {} created", room->get_id());
-  return make_ok_env(Protocol::SERVICE_SUCCESS, json(rsp));
+  const int code = server->create_room(req.maximumPeople, req.uid, rsp);
+  return make_env(code, code == Protocol::SERVICE_SUCCESS ? json(rsp)
+                                                          : json::object());
 }
 
-// hanlde JOIN_ROOM
-Protocol::Envelope Channel::handle_join_room(const json &j) {
-  auto req = j.get<Protocol::JoinRoomReq>();
-  auto reqUser = server->get_user(req.uid);
-  if (!reqUser)
-    return make_err_env(Protocol::SERVICE_FAIL | Protocol::NOT_FOUND,
-                        "Not logged in");
-
-  auto room = server->get_room(req.roomId);
-  if (!room)
-    return make_err_env(Protocol::SERVICE_FAIL | Protocol::NOT_FOUND,
-                        "Room does not exist");
-  if (!server->join_room(room, reqUser))
-    return make_err_env(Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR,
-                        "Failed to join room");
-
+Protocol::Envelope Channel::on_join_room(const Protocol::JoinRoomReq &req) {
   Protocol::JoinRoomRsp rsp;
-  room->collect_members_info(rsp.PlayerInfos);
-  logging::log("User {} joined room {}", req.uid, req.roomId);
-  return make_ok_env(Protocol::SERVICE_SUCCESS, json(rsp));
+  const int code = server->join_room(req.roomId, req.uid, rsp);
+  return make_env(code, code == Protocol::SERVICE_SUCCESS ? json(rsp)
+                                                          : json::object());
 }
 
-// handle LIST_ROOMS
-Protocol::Envelope Channel::handle_list_rooms(const json &) {
+Protocol::Envelope Channel::on_list_rooms(const Protocol::ListRoomsReq &) {
   Protocol::ListRoomsRsp rsp;
-  server->list_rooms(rsp.RoomInfos);
-  return make_ok_env(Protocol::SERVICE_SUCCESS, json(rsp));
+  const int code = server->list_rooms(rsp);
+  return make_env(code, code == Protocol::SERVICE_SUCCESS ? json(rsp)
+                                                          : json::object());
 }
 
-Protocol::Envelope Channel::handle_leave_room(const json &j) {
-  auto req = j.get<Protocol::LeaveRoomReq>();
-  auto reqUser = server->get_user(req.uid);
-  if (!reqUser) {
-    return make_err_env(Protocol::SERVICE_FAIL | Protocol::NOT_FOUND,
-                        "Not logged in");
-  }
-  if (!reqUser->is_in_room()) {
-    return make_err_env(Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR,
-                        "Not in any room");
-  }
-
-  const int roomId = reqUser->get_room_id();
-  if (!server->leave_room(roomId, reqUser->get_uid())) {
-    return make_err_env(Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR,
-                        "Failed to leave room");
-  }
-
-  logging::log("User {} left room", req.uid);
-  return make_ok_env(Protocol::SERVICE_SUCCESS, json::object());
+Protocol::Envelope Channel::on_leave_room(const Protocol::LeaveRoomReq &req) {
+  const int code = server->leave_room(req.uid);
+  return make_env(code);
 }
 
-Protocol::Envelope Channel::handle_heartbeat(const json &j) {
-  auto req = j.get<Protocol::HeartbeatReq>();
-
-  std::shared_ptr<User> target = nullptr;
-  if (!req.uid.empty()) {
-    target = server->get_user(req.uid);
-  }
-
-  if (!target) {
-    return make_err_env(Protocol::SERVICE_FAIL | Protocol::NOT_FOUND,
-                        "uid not exists");
-  }
-
-  target->touch_heartbeat();
-  return make_ok_env(Protocol::SERVICE_SUCCESS,
-                     json{{"uid", target->get_uid()}});
+Protocol::Envelope Channel::on_heartbeat(const Protocol::HeartbeatReq &req) {
+  const int code = server->heartbeat(req.uid);
+  return make_env(code, code == Protocol::SERVICE_SUCCESS
+                            ? json{{"uid", req.uid}}
+                            : json::object());
 }
 
-// handle all
+// Parse, dispatch by type, and respond with a single envelope.
 asio::awaitable<void> Channel::handle_message(std::string &msg) {
-  // Parse, dispatch by type, and respond with a single envelope.
-  Protocol::Envelope responseEnv =
-      make_err_env(Protocol::SYSTEM_ERROR, "Unknown error");
+  Protocol::Envelope responseEnv = make_env(Protocol::SYSTEM_ERROR);
 
   try {
+    const auto &commandTable = command_table();
     auto j = json::parse(msg);
     Protocol::CommandType type = j.value("type", Protocol::CommandType::ERROR);
 
-    switch (type) {
-    case Protocol::CommandType::LOGIN: {
-      if (j.value("uid", "") == "")
-        responseEnv = handle_register(j); // register if uid is empty
-      else
-        responseEnv = handle_login(j);
-      break;
-    }
-    case Protocol::CommandType::CREATE_ROOM: {
-      responseEnv = handle_create_room(j);
-      break;
-    }
-    case Protocol::CommandType::JOIN_ROOM: {
-      responseEnv = handle_join_room(j);
-      break;
-    }
-    case Protocol::CommandType::LIST_ROOMS: {
-      responseEnv = handle_list_rooms(j);
-      break;
-    }
-    case Protocol::CommandType::LEAVE_ROOM: {
-      responseEnv = handle_leave_room(j);
-      break;
-    }
-    case Protocol::CommandType::HEARTBEAT: {
-      responseEnv = handle_heartbeat(j);
-      break;
-    }
-    default:
-      responseEnv = make_err_env(Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST,
-                                 "Unknown command");
-    }
+    auto it = std::find_if(
+        commandTable.begin(), commandTable.end(),
+        [type](const CommandDescriptor &entry) { return entry.type == type; });
+
+    if (it == commandTable.end())
+      responseEnv = make_env(Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST);
+    else
+      responseEnv = it->dispatch(*this, j);
+
   } catch (const std::exception &e) {
-    responseEnv =
-        make_err_env(Protocol::SYSTEM_ERROR | Protocol::DESERIALIZE_FAIL,
-                     std::string(e.what()));
+    logging::log("Parse or dispatch failed: {}", e.what());
+    responseEnv = make_env(Protocol::SYSTEM_ERROR | Protocol::DESERIALIZE_FAIL);
   }
 
   // Send response outside try-catch to avoid co_await issue

@@ -142,9 +142,9 @@ struct CreateRoomRsp {
 };
 
 struct JoinRoomRsp {
-  std::vector<PlayerBasicInfo> PlayerInfos;
+  std::vector<PlayerBasicInfo> playerInfos;
 
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(JoinRoomRsp, PlayerInfos)
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(JoinRoomRsp, playerInfos)
 };
 
 struct LeaveRoomRsp {
@@ -164,9 +164,9 @@ struct RoomInfo {
 };
 
 struct ListRoomsRsp {
-  std::vector<RoomInfo> RoomInfos;
+  std::vector<RoomInfo> roomInfos;
 
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(ListRoomsRsp, RoomInfos)
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(ListRoomsRsp, roomInfos)
 };
 
 struct SendMessagePush {

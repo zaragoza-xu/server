@@ -22,7 +22,7 @@ using namespace asio::ip;
 
 Server::Server(asio::io_context &context, int port)
     : ioContext(context), acceptor(context, tcp::endpoint(tcp::v4(), port)),
-      heartbeatTimer(context), nextRoomId(1) {
+      heartbeatTimer(context), nextRoomId(1), nextUid(1) {
   // Start accepting connections immediately on construction.
   asio::co_spawn(ioContext, accept_loop(), asio::detached);
   asio::co_spawn(ioContext, heartbeat_monitor(), asio::detached);
@@ -47,39 +47,36 @@ asio::awaitable<void> Server::accept_loop() {
   }
 }
 
-auto Server::register_user() -> std::shared_ptr<User> {
+int Server::register_user(Protocol::RegisterRsp &rsp) {
   std::scoped_lock lock(usersMutex, userInfosMutex);
 
   Protocol::PlayerBasicInfo storedInfo = {"", "", 0};
   storedInfo.uid = std::to_string(nextUid++);
-  userInfos[storedInfo.uid] = storedInfo;
+  userInfos.emplace(storedInfo.uid, storedInfo);
 
-  auto user = std::make_shared<User>(storedInfo.uid, storedInfo.userName,
-                                     storedInfo.avatarType);
+  auto user = std::make_shared<User>(storedInfo);
   users[storedInfo.uid] = user;
-  return user;
+  rsp.uid = storedInfo.uid;
+  return Protocol::SERVICE_SUCCESS;
 }
 
-auto Server::login_user(const std::string &uid) -> std::shared_ptr<User> {
+int Server::login_user(const std::string &uid, Protocol::LoginRsp &rsp) {
   std::scoped_lock lock(usersMutex, userInfosMutex);
+
   auto infoIt = userInfos.find(uid);
   if (infoIt == userInfos.end()) {
-    return nullptr;
+    return Protocol::SERVICE_FAIL | Protocol::NOT_FOUND;
   }
-
   auto onlineIt = users.find(uid);
   if (onlineIt != users.end()) {
-    auto user = onlineIt->second;
-    if (user) {
-      user->touch_heartbeat();
-    }
-    return user;
+    rsp.basicInfo = onlineIt->second->get_info();
+    return Protocol::SERVICE_SUCCESS;
   }
 
-  const auto &info = infoIt->second;
-  auto user = std::make_shared<User>(info.uid, info.userName, info.avatarType);
-  users[uid] = user;
-  return user;
+  auto user = std::make_shared<User>(infoIt->second);
+  users.emplace(uid, user);
+  rsp.basicInfo = user->get_info();
+  return Protocol::SERVICE_SUCCESS;
 }
 
 void Server::logout_user(const std::string &uid) {
@@ -95,7 +92,7 @@ void Server::logout_user(const std::string &uid) {
   }
 
   if (user && user->is_in_room()) {
-    leave_room(user->get_room_id(), uid);
+    leave_room(uid);
   }
 }
 
@@ -113,48 +110,75 @@ bool Server::user_exists(const std::string &uid) const {
   return userInfos.count(uid) > 0;
 }
 
-std::shared_ptr<Room> Server::create_room(const size_t maximumPeople,
-                                          std::shared_ptr<User> user) {
-  std::lock_guard<std::mutex> lock(roomsMutex);
+int Server::create_room(const size_t maximumPeople, const std::string &uid,
+                        Protocol::CreateRoomRsp &rsp) {
+  std::scoped_lock lock(usersMutex, roomsMutex);
+  auto userIt = users.find(uid);
+  if (userIt == users.end() || !userIt->second) {
+    return Protocol::SERVICE_FAIL | Protocol::NOT_FOUND;
+  }
+  auto user = userIt->second;
+  if (user->is_in_room()) {
+    return Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR;
+  }
+
   int room_id = nextRoomId++;
   auto room = std::make_shared<Room>(room_id, maximumPeople, user);
-  rooms[room_id] = room;
+  rooms.emplace(room_id, room);
   user->set_room_id(room_id);
-  return room;
+  rsp.roomId = room_id;
+  return Protocol::SERVICE_SUCCESS;
 }
 
-std::shared_ptr<Room> Server::get_room(int room_id) const {
-  std::lock_guard<std::mutex> lock(roomsMutex);
-  auto it = rooms.find(room_id);
-  if (it != rooms.end())
-    return it->second;
-  return nullptr;
-}
+int Server::join_room(int room_id, const std::string &uid,
+                      Protocol::JoinRoomRsp &rsp) {
+  std::scoped_lock lock(usersMutex, roomsMutex);
 
-bool Server::join_room(std::shared_ptr<Room> room, std::shared_ptr<User> user) {
-  std::lock_guard<std::mutex> lock(roomsMutex);
+  auto roomIt = rooms.find(room_id);
+  if (roomIt == rooms.end()) {
+    return Protocol::SERVICE_FAIL | Protocol::NOT_FOUND;
+  }
+  auto userIt = users.find(uid);
+  if (userIt == users.end() || !userIt->second) {
+    return Protocol::SERVICE_FAIL | Protocol::NOT_FOUND;
+  }
 
+  auto user = userIt->second;
+  auto room = roomIt->second;
   if (user->is_in_room()) {
-    return false;
+    return Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR;
   }
 
   bool success = room->add_member(user);
-  if (success)
-    user->set_room_id(room->get_id());
-  return success;
+  if (!success) {
+    return Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR;
+  }
+  user->set_room_id(room->get_id());
+  room->collect_members_info(rsp.playerInfos);
+  return Protocol::SERVICE_SUCCESS;
 }
 
-bool Server::leave_room(int room_id, const std::string &uid) {
-  std::lock_guard<std::mutex> lock(roomsMutex);
-  auto it = rooms.find(room_id);
-  if (it == rooms.end()) {
-    return false;
+int Server::leave_room(const std::string &uid) {
+  std::scoped_lock lock(usersMutex, roomsMutex);
+
+  auto userIt = users.find(uid);
+  if (userIt == users.end() || !userIt->second) {
+    return Protocol::SERVICE_FAIL | Protocol::NOT_FOUND;
+  }
+  auto member = userIt->second;
+  if (!member->is_in_room()) {
+    return Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR;
   }
 
+  const int room_id = member->get_room_id();
+  auto it = rooms.find(room_id);
+  if (it == rooms.end()) {
+    return Protocol::SERVICE_FAIL | Protocol::NOT_FOUND;
+  }
   auto room = it->second;
-  auto member = room->get_member(uid);
-  if (member == nullptr)
-    return false;
+  if (!room->is_member(uid)) {
+    return Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR;
+  }
 
   room->remove_member(uid);
   member->set_room_id(-1);
@@ -163,18 +187,29 @@ bool Server::leave_room(int room_id, const std::string &uid) {
   if (room->get_people_count() == 0) {
     rooms.erase(it);
   }
-  return true;
+  return Protocol::SERVICE_SUCCESS;
 }
 
-void Server::list_rooms(std::vector<Protocol::RoomInfo> &roomInfos) const {
+int Server::list_rooms(Protocol::ListRoomsRsp &rsp) {
   std::lock_guard<std::mutex> lock(roomsMutex);
-  roomInfos.clear();
-  roomInfos.reserve(rooms.size());
+  rsp.roomInfos.clear();
+  rsp.roomInfos.reserve(rooms.size());
   for (const auto &[id, room] : rooms) {
-    roomInfos.push_back({.roomId = id,
-                         .maximumPeople = room->get_maximum_people(),
-                         .peopleCount = room->get_people_count()});
+    rsp.roomInfos.push_back({.roomId = id,
+                             .maximumPeople = room->get_maximum_people(),
+                             .peopleCount = room->get_people_count()});
   }
+  return Protocol::SERVICE_SUCCESS;
+}
+
+int Server::heartbeat(const std::string &uid) {
+  std::lock_guard<std::mutex> lock(usersMutex);
+  auto it = users.find(uid);
+  if (it == users.end() || !it->second) {
+    return Protocol::SERVICE_FAIL | Protocol::NOT_FOUND;
+  }
+  it->second->touch_heartbeat();
+  return Protocol::SERVICE_SUCCESS;
 }
 
 asio::awaitable<void> Server::heartbeat_monitor() {
