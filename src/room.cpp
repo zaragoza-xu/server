@@ -6,7 +6,7 @@
 #include "user.h"
 
 Room::Room(int roomId, size_t maximumPeople, std::shared_ptr<User> creator)
-    : roomId(roomId), maximumPeople(maximumPeople), creator(creator) {
+    : roomId(roomId), maximumPeople(maximumPeople) {
   members.emplace(creator->get_uid(), creator);
 }
 

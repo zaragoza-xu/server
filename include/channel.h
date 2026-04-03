@@ -15,22 +15,30 @@ class Server;
 
 class Channel : public std::enable_shared_from_this<Channel> {
 protected:
+  using DispatchFn = Protocol::Envelope (*)(Channel &, const json &);
+  struct CommandDescriptor {
+    Protocol::CommandType type;
+    DispatchFn dispatch;
+  };
+  using CommandTable = std::array<CommandDescriptor, 6>;
+
   asio::ip::tcp::socket socket;
   std::array<char, 2048> buf;
   std::shared_ptr<Server> server;
-  
-  // Construct a uniform response envelope.
-  static Protocol::Envelope make_ok_env(int code, const json &data);
-  static Protocol::Envelope make_err_env(int code,
-                                         const std::string &message);
 
-  Protocol::Envelope handle_register(const json &j);
-  Protocol::Envelope handle_login(const json &j);
-  Protocol::Envelope handle_create_room(const json &j);
-  Protocol::Envelope handle_join_room(const json &j);
-  Protocol::Envelope handle_list_rooms(const json &j);
-  Protocol::Envelope handle_leave_room(const json &j);
-  Protocol::Envelope handle_heartbeat(const json &j);
+  // Build response envelope from status code and optional payload.
+  static Protocol::Envelope make_env(int code,
+                                     const json &data = json::object());
+  static const CommandTable &command_table();
+
+  // Typed handlers: business logic after request parsing.
+  Protocol::Envelope on_register(const Protocol::LoginReq &req);
+  Protocol::Envelope on_login(const Protocol::LoginReq &req);
+  Protocol::Envelope on_create_room(const Protocol::CreateRoomReq &req);
+  Protocol::Envelope on_join_room(const Protocol::JoinRoomReq &req);
+  Protocol::Envelope on_list_rooms(const Protocol::ListRoomsReq &req);
+  Protocol::Envelope on_leave_room(const Protocol::LeaveRoomReq &req);
+  Protocol::Envelope on_heartbeat(const Protocol::HeartbeatReq &req);
 
   asio::awaitable<void> handle_message(std::string &msg);
 

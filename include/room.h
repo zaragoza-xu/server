@@ -7,17 +7,14 @@
 #include <unordered_map>
 #include <vector>
 
-class User;
+#include "protocol.h"
 
-namespace Protocol {
-struct PlayerBasicInfo;
-}
+class User;
 
 class Room {
 private:
   int roomId;
   size_t maximumPeople;
-  std::shared_ptr<User> creator;
   std::unordered_map<std::string, std::shared_ptr<User>> members;
   mutable std::mutex roomMutex;
 
@@ -25,7 +22,6 @@ public:
   Room(int roomId, size_t maximumPeople, std::shared_ptr<User> creator);
 
   int get_id() const { return roomId; }
-  std::shared_ptr<User> get_creator() const { return creator; }
 
   void collect_members_info(
       std::vector<Protocol::PlayerBasicInfo> &PlayerInfos) const;
