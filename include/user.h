@@ -19,8 +19,8 @@ public:
 
   const Protocol::PlayerBasicInfo &get_info() const { return info; }
 
-  const std::string &get_username() const { return info.userName; }
-  int get_avatar_type() const { return info.avatarType; }
+  const std::string &get_username() const { return info.name; }
+  int get_color() const { return info.color; }
   const std::string &get_uid() const { return info.uid; }
 
   int get_room_id() const { return roomId; }

@@ -1,5 +1,6 @@
 #include "server.h"
-#include <cstddef>
+
+#include <algorithm>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -20,12 +21,23 @@
 
 using namespace asio::ip;
 
-Server::Server(asio::io_context &context, int port)
-    : ioContext(context), acceptor(context, tcp::endpoint(tcp::v4(), port)),
-      heartbeatTimer(context), nextRoomId(1), nextUid(1) {
-  // Start accepting connections immediately on construction.
+Server::Server(asio::io_context &context, int port,
+               std::shared_ptr<ServerState> sharedState)
+    : ioContext(context), port(port),
+      acceptor(context, tcp::endpoint(tcp::v4(), port)),
+      heartbeatTimer(context), state(std::move(sharedState)) {
+  if (!state) {
+    state = std::make_shared<ServerState>();
+  }
+
   asio::co_spawn(ioContext, accept_loop(), asio::detached);
   asio::co_spawn(ioContext, heartbeat_monitor(), asio::detached);
+}
+
+Protocol::Envelope Server::dispatch_request(const json &) {
+  logging::log("[dispatch][base] reached fallback dispatcher");
+  return Protocol::Envelope::make_env(Protocol::SERVICE_FAIL |
+                                      Protocol::BAD_REQUEST);
 }
 
 asio::awaitable<void> Server::accept_loop() {
@@ -47,53 +59,57 @@ asio::awaitable<void> Server::accept_loop() {
   }
 }
 
-int Server::register_user(Protocol::RegisterRsp &rsp) {
-  std::scoped_lock lock(usersMutex, userInfosMutex);
+int Server::register_user(const Protocol::RegisterReq &req,
+                          Protocol::RegisterRsp &rsp) {
+  std::scoped_lock lock(state->usersMutex, state->userInfosMutex);
 
   Protocol::PlayerBasicInfo storedInfo = {"", "", 0};
-  storedInfo.uid = std::to_string(nextUid++);
-  userInfos.emplace(storedInfo.uid, storedInfo);
+  storedInfo.uid = std::to_string(state->nextUid++);
+  state->userInfos.emplace(storedInfo.uid, storedInfo);
 
   auto user = std::make_shared<User>(storedInfo);
-  users[storedInfo.uid] = user;
+  state->users[storedInfo.uid] = user;
   rsp.uid = storedInfo.uid;
   return Protocol::SERVICE_SUCCESS;
 }
 
-int Server::login_user(const std::string &uid, Protocol::LoginRsp &rsp) {
-  std::scoped_lock lock(usersMutex, userInfosMutex);
+int Server::login_user(const Protocol::LoginReq &req, Protocol::LoginRsp &rsp) {
+  std::scoped_lock lock(state->usersMutex, state->userInfosMutex);
 
-  auto infoIt = userInfos.find(uid);
-  if (infoIt == userInfos.end()) {
+  if (req.uid == "") {
+    return Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST;
+  }
+  auto infoIt = state->userInfos.find(req.uid);
+  if (infoIt == state->userInfos.end()) {
     return Protocol::SERVICE_FAIL | Protocol::NOT_FOUND;
   }
-  auto onlineIt = users.find(uid);
-  if (onlineIt != users.end()) {
+  auto onlineIt = state->users.find(req.uid);
+  if (onlineIt != state->users.end()) {
     onlineIt->second->touch_heartbeat();
-    rsp.basicInfo = onlineIt->second->get_info();
+    rsp.playerData.basicInfo = onlineIt->second->get_info();
     return Protocol::SERVICE_SUCCESS;
   }
 
   auto user = std::make_shared<User>(infoIt->second);
-  users.emplace(uid, user);
-  rsp.basicInfo = user->get_info();
+  state->users.emplace(req.uid, user);
+  rsp.playerData.basicInfo = user->get_info();
   return Protocol::SERVICE_SUCCESS;
 }
 
 void Server::logout_user(const std::string &uid) {
   std::shared_ptr<User> user;
-  std::scoped_lock lock(usersMutex, roomsMutex);
-  auto it = users.find(uid);
-  if (it == users.end()) {
+  std::scoped_lock lock(state->usersMutex, state->roomsMutex);
+  auto it = state->users.find(uid);
+  if (it == state->users.end()) {
     return;
   }
   user = it->second;
-  users.erase(it);
+  state->users.erase(it);
 
   if (user && user->is_in_room()) {
     const int room_id = user->get_room_id();
-    auto it = rooms.find(room_id);
-    if (it == rooms.end()) {
+    auto it = state->rooms.find(room_id);
+    if (it == state->rooms.end()) {
       return;
     }
     auto room = it->second;
@@ -103,32 +119,31 @@ void Server::logout_user(const std::string &uid) {
 
     room->remove_member(uid);
     user->set_room_id(-1);
-    // Remove empty rooms to keep the registry clean.
     if (room->get_people_count() == 0) {
-      rooms.erase(it);
+      state->rooms.erase(it);
     }
   }
 }
 
 std::shared_ptr<User> Server::get_user(const std::string &uid) const {
-  std::lock_guard<std::mutex> lock(usersMutex);
-  auto it = users.find(uid);
-  if (it != users.end()) {
+  std::lock_guard<std::mutex> lock(state->usersMutex);
+  auto it = state->users.find(uid);
+  if (it != state->users.end()) {
     return it->second;
   }
   return nullptr;
 }
 
 bool Server::user_exists(const std::string &uid) const {
-  std::lock_guard<std::mutex> lock(userInfosMutex);
-  return userInfos.count(uid) > 0;
+  std::lock_guard<std::mutex> lock(state->userInfosMutex);
+  return state->userInfos.count(uid) > 0;
 }
 
-int Server::create_room(const size_t maximumPeople, const std::string &uid,
+int Server::create_room(const Protocol::CreateRoomReq &req,
                         Protocol::CreateRoomRsp &rsp) {
-  std::scoped_lock lock(usersMutex, roomsMutex);
-  auto userIt = users.find(uid);
-  if (userIt == users.end() || !userIt->second) {
+  std::scoped_lock lock(state->usersMutex, state->roomsMutex);
+  auto userIt = state->users.find(req.uid);
+  if (userIt == state->users.end() || !userIt->second) {
     return Protocol::SERVICE_FAIL | Protocol::NOT_FOUND;
   }
   auto user = userIt->second;
@@ -136,24 +151,24 @@ int Server::create_room(const size_t maximumPeople, const std::string &uid,
     return Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR;
   }
 
-  int room_id = nextRoomId++;
-  auto room = std::make_shared<Room>(room_id, maximumPeople, user);
-  rooms.emplace(room_id, room);
+  int room_id = state->nextRoomId++;
+  auto room = std::make_shared<Room>(room_id, req.maximumPeople, user);
+  state->rooms.emplace(room_id, room);
   user->set_room_id(room_id);
   rsp.roomId = room_id;
   return Protocol::SERVICE_SUCCESS;
 }
 
-int Server::join_room(int room_id, const std::string &uid,
+int Server::join_room(const Protocol::JoinRoomReq &req,
                       Protocol::JoinRoomRsp &rsp) {
-  std::scoped_lock lock(usersMutex, roomsMutex);
+  std::scoped_lock lock(state->usersMutex, state->roomsMutex);
 
-  auto roomIt = rooms.find(room_id);
-  if (roomIt == rooms.end()) {
+  auto roomIt = state->rooms.find(req.roomId);
+  if (roomIt == state->rooms.end()) {
     return Protocol::SERVICE_FAIL | Protocol::NOT_FOUND;
   }
-  auto userIt = users.find(uid);
-  if (userIt == users.end() || !userIt->second) {
+  auto userIt = state->users.find(req.uid);
+  if (userIt == state->users.end() || !userIt->second) {
     return Protocol::SERVICE_FAIL | Protocol::NOT_FOUND;
   }
 
@@ -172,11 +187,12 @@ int Server::join_room(int room_id, const std::string &uid,
   return Protocol::SERVICE_SUCCESS;
 }
 
-int Server::leave_room(const std::string &uid) {
-  std::scoped_lock lock(usersMutex, roomsMutex);
+int Server::leave_room(const Protocol::LeaveRoomReq &req,
+                       Protocol::EmptyRsp &) {
+  std::scoped_lock lock(state->usersMutex, state->roomsMutex);
 
-  auto userIt = users.find(uid);
-  if (userIt == users.end() || !userIt->second) {
+  auto userIt = state->users.find(req.uid);
+  if (userIt == state->users.end() || !userIt->second) {
     return Protocol::SERVICE_FAIL | Protocol::NOT_FOUND;
   }
   auto member = userIt->second;
@@ -185,30 +201,30 @@ int Server::leave_room(const std::string &uid) {
   }
 
   const int room_id = member->get_room_id();
-  auto it = rooms.find(room_id);
-  if (it == rooms.end()) {
+  auto it = state->rooms.find(room_id);
+  if (it == state->rooms.end()) {
     return Protocol::SERVICE_FAIL | Protocol::NOT_FOUND;
   }
   auto room = it->second;
-  if (!room->is_member(uid)) {
+  if (!room->is_member(req.uid)) {
     return Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR;
   }
 
-  room->remove_member(uid);
+  room->remove_member(req.uid);
   member->set_room_id(-1);
 
-  // Remove empty rooms to keep the registry clean.
   if (room->get_people_count() == 0) {
-    rooms.erase(it);
+    state->rooms.erase(it);
   }
   return Protocol::SERVICE_SUCCESS;
 }
 
-int Server::list_rooms(Protocol::ListRoomsRsp &rsp) {
-  std::lock_guard<std::mutex> lock(roomsMutex);
+int Server::list_rooms(const Protocol::ListRoomsReq &,
+                       Protocol::ListRoomsRsp &rsp) {
+  std::lock_guard<std::mutex> lock(state->roomsMutex);
   rsp.roomInfos.clear();
-  rsp.roomInfos.reserve(rooms.size());
-  for (const auto &[id, room] : rooms) {
+  rsp.roomInfos.reserve(state->rooms.size());
+  for (const auto &[id, room] : state->rooms) {
     rsp.roomInfos.push_back({.roomId = id,
                              .maximumPeople = room->get_maximum_people(),
                              .peopleCount = room->get_people_count()});
@@ -216,14 +232,50 @@ int Server::list_rooms(Protocol::ListRoomsRsp &rsp) {
   return Protocol::SERVICE_SUCCESS;
 }
 
-int Server::heartbeat(const std::string &uid) {
-  std::lock_guard<std::mutex> lock(usersMutex);
-  auto it = users.find(uid);
-  if (it == users.end() || !it->second) {
+int Server::heartbeat(const Protocol::HeartbeatReq &req, Protocol::EmptyRsp &) {
+  std::lock_guard<std::mutex> lock(state->usersMutex);
+  auto it = state->users.find(req.uid);
+  if (it == state->users.end() || !it->second) {
     return Protocol::SERVICE_FAIL | Protocol::NOT_FOUND;
   }
   it->second->touch_heartbeat();
   return Protocol::SERVICE_SUCCESS;
+}
+
+Protocol::Envelope LoginServer::dispatch_request(const json &request) {
+  logging::log("[dispatch][login] request={}", request.dump());
+  const auto type = static_cast<Protocol::LoginRequestType>(request.value(
+      "type", static_cast<int>(Protocol::LoginRequestType::ERROR)));
+  const auto it = std::find_if(
+      COMMAND_TABLE.begin(), COMMAND_TABLE.end(),
+      [type](const CommandDescriptor &entry) { return entry.type == type; });
+  if (it == COMMAND_TABLE.end()) {
+    logging::log("[dispatch][login] unknown type={}", static_cast<int>(type));
+    return Protocol::Envelope::make_env(Protocol::SERVICE_FAIL |
+                                        Protocol::BAD_REQUEST);
+  }
+  const auto env = it->dispatch(*this, request);
+  logging::log("[dispatch][login] type={} code={} message={}",
+               static_cast<int>(type), env.code, env.message);
+  return env;
+}
+
+Protocol::Envelope HomeServer::dispatch_request(const json &request) {
+  logging::log("[dispatch][home] request={}", request.dump());
+  const auto type = static_cast<Protocol::HomeRequestType>(request.value(
+      "type", static_cast<int>(Protocol::HomeRequestType::ERROR)));
+  const auto it = std::find_if(
+      COMMAND_TABLE.begin(), COMMAND_TABLE.end(),
+      [type](const CommandDescriptor &entry) { return entry.type == type; });
+  if (it == COMMAND_TABLE.end()) {
+    logging::log("[dispatch][home] unknown type={}", static_cast<int>(type));
+    return Protocol::Envelope::make_env(Protocol::SERVICE_FAIL |
+                                        Protocol::BAD_REQUEST);
+  }
+  const auto env = it->dispatch(*this, request);
+  logging::log("[dispatch][home] type={} code={} message={}",
+               static_cast<int>(type), env.code, env.message);
+  return env;
 }
 
 asio::awaitable<void> Server::heartbeat_monitor() {
@@ -239,8 +291,8 @@ asio::awaitable<void> Server::heartbeat_monitor() {
     std::vector<std::string> expired;
     const auto now = std::chrono::steady_clock::now();
     {
-      std::lock_guard<std::mutex> lock(usersMutex);
-      for (const auto &[uid, user] : users) {
+      std::lock_guard<std::mutex> lock(state->usersMutex);
+      for (const auto &[uid, user] : state->users) {
         if (!user) {
           continue;
         }
@@ -255,18 +307,3 @@ asio::awaitable<void> Server::heartbeat_monitor() {
     }
   }
 }
-
-// asio::awaitable<void> Server::broadcast_to_room(int room_id,
-//                                                 const std::string &message) {
-//   auto room = get_room(room_id);
-//   if (!room) {
-//     co_return;
-//   }
-
-//   for (const auto &[uid, user] : room->get_members()) {
-//     (void)uid;
-//     if (user && user->get_channel()) {
-//       co_await user->get_channel()->send_message(message);
-//     }
-//   }
-// }
