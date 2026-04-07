@@ -16,16 +16,16 @@ constexpr std::string_view HEADER = "CHAT";
 constexpr int HEADER_SIZE = 4;
 constexpr int MAX_MESSAGE_SIZE = 65536;
 
-enum class CommandType : int {
-  // Numeric command identifiers used in the JSON "type" field.
-  LOGIN,
-  CREATE_ROOM,
-  JOIN_ROOM,
-  LEAVE_ROOM,
-  LIST_ROOMS,
-  SEND_MESSAGE,
-  HEARTBEAT,
-  EDIT_PROFILE,
+enum class LoginRequestType { LOGIN = 0, REGISTER = 1, ERROR = 100 };
+
+enum class HomeRequestType {
+  CREATE_ROOM = 0,
+  JOIN_ROOM = 1,
+  LEAVE_ROOM = 2,
+  LIST_ROOMS = 3,
+  SEND_MESSAGE = 4,
+  HEARTBEAT = 5,
+  EDIT_PROFILE = 6,
   ERROR = 100
 };
 
@@ -67,21 +67,21 @@ struct Envelope {
 };
 
 struct LoginReq {
-  Protocol::CommandType type;
+  Protocol::LoginRequestType type;
   std::string uid;
 
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(LoginReq, type, uid)
 };
 
 struct EditProfileReq {
-  Protocol::CommandType type;
+  Protocol::HomeRequestType type;
   PlayerBasicInfo basicInfo;
 
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(EditProfileReq, type, basicInfo);
 };
 
 struct CreateRoomReq {
-  Protocol::CommandType type;
+  Protocol::HomeRequestType type;
   std::string uid;
   size_t maximumPeople = 0;
 
@@ -90,7 +90,7 @@ struct CreateRoomReq {
 };
 
 struct JoinRoomReq {
-  Protocol::CommandType type;
+  Protocol::HomeRequestType type;
   int roomId = -1;
   std::string uid;
 
@@ -98,26 +98,26 @@ struct JoinRoomReq {
 };
 
 struct LeaveRoomReq {
-  Protocol::CommandType type;
+  Protocol::HomeRequestType type;
   std::string uid;
 
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(LeaveRoomReq, type, uid)
 };
 
 struct ListRoomsReq {
-  Protocol::CommandType type;
+  Protocol::HomeRequestType type;
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(ListRoomsReq, type)
 };
 
 struct SendMessageReq {
-  Protocol::CommandType type;
+  Protocol::HomeRequestType type;
   std::string content;
 
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(SendMessageReq, type, content)
 };
 
 struct HeartbeatReq {
-  Protocol::CommandType type;
+  Protocol::HomeRequestType type;
   std::string uid;
 
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(HeartbeatReq, type, uid);

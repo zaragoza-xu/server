@@ -102,15 +102,25 @@ ctest --test-dir build --output-on-failure
 ## 运行
 
 ```bash
-./build/server
+./build/server --auth-port 8765 --lobby-port 8766
 ```
 
-服务默认监听端口：`7777`。
+说明：
+
+- 认证端口（auth）：处理登录/注册请求（`LOGIN`，`uid` 为空时视为注册）
+- 大厅端口（lobby）：处理联机大厅请求（创建/加入/离开/列房间/心跳）
+- 两个端口必须不同
 
 ## 快速测试
 
 可用 `nc` 连接测试（每条 JSON 末尾换行）：
 
 ```bash
-nc 127.0.0.1 7777
+nc 127.0.0.1 8765
+```
+
+大厅端口示例：
+
+```bash
+nc 127.0.0.1 8766
 ```

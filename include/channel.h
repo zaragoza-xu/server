@@ -17,10 +17,10 @@ class Channel : public std::enable_shared_from_this<Channel> {
 protected:
   using DispatchFn = Protocol::Envelope (*)(Channel &, const json &);
   struct CommandDescriptor {
-    Protocol::CommandType type;
+    Protocol::HomeRequestType type;
     DispatchFn dispatch;
   };
-  using CommandTable = std::array<CommandDescriptor, 6>;
+  using CommandTable = std::array<CommandDescriptor, 5>;
 
   asio::ip::tcp::socket socket;
   std::array<char, 2048> buf;
@@ -29,7 +29,6 @@ protected:
   // Build response envelope from status code and optional payload.
   static Protocol::Envelope make_env(int code,
                                      const json &data = json::object());
-  static const CommandTable &command_table();
 
   // Typed handlers: business logic after request parsing.
   Protocol::Envelope on_register(const Protocol::LoginReq &req);

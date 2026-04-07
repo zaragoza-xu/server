@@ -1,6 +1,5 @@
 #include "channel.h"
 
-#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <nlohmann/json.hpp>
@@ -53,24 +52,6 @@ Protocol::Envelope dispatch_typed(Channel &self, const json &j) {
   return (self.*Method)(req);
 }
 } // namespace
-
-const Channel::CommandTable &Channel::command_table() {
-  static const CommandTable table{{
-      {Protocol::CommandType::LOGIN,
-       &dispatch_typed<Protocol::LoginReq, &Channel::on_login>},
-      {Protocol::CommandType::CREATE_ROOM,
-       &dispatch_typed<Protocol::CreateRoomReq, &Channel::on_create_room>},
-      {Protocol::CommandType::JOIN_ROOM,
-       &dispatch_typed<Protocol::JoinRoomReq, &Channel::on_join_room>},
-      {Protocol::CommandType::LIST_ROOMS,
-       &dispatch_typed<Protocol::ListRoomsReq, &Channel::on_list_rooms>},
-      {Protocol::CommandType::LEAVE_ROOM,
-       &dispatch_typed<Protocol::LeaveRoomReq, &Channel::on_leave_room>},
-      {Protocol::CommandType::HEARTBEAT,
-       &dispatch_typed<Protocol::HeartbeatReq, &Channel::on_heartbeat>},
-  }};
-  return table;
-}
 
 asio::awaitable<void> Channel::run() {
   // Accumulate data and split on newline delimiter.
@@ -148,7 +129,7 @@ asio::awaitable<bool> Channel::send_message(const std::string &msg) {
 // ----------------------------------------------------------------------
 
 Protocol::Envelope Channel::on_register(const Protocol::LoginReq &req) {
-  if (!req.uid.empty()) {
+  if (req.type != Protocol::LoginRequestType::REGISTER || !req.uid.empty()) {
     return make_env(Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST);
   }
 
@@ -158,8 +139,11 @@ Protocol::Envelope Channel::on_register(const Protocol::LoginReq &req) {
 }
 
 Protocol::Envelope Channel::on_login(const Protocol::LoginReq &req) {
-  if (req.uid.empty()) {
+  if (req.type == Protocol::LoginRequestType::REGISTER) {
     return on_register(req);
+  }
+  if (req.type != Protocol::LoginRequestType::LOGIN || req.uid.empty()) {
+    return make_env(Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST);
   }
   Protocol::LoginRsp rsp;
   const int code = server->login_user(req.uid, rsp);
@@ -181,7 +165,8 @@ Protocol::Envelope Channel::on_join_room(const Protocol::JoinRoomReq &req) {
                                                           : json::object());
 }
 
-Protocol::Envelope Channel::on_list_rooms(const Protocol::ListRoomsReq &) {
+Protocol::Envelope Channel::on_list_rooms(const Protocol::ListRoomsReq &req) {
+  (void)req;
   Protocol::ListRoomsRsp rsp;
   const int code = server->list_rooms(rsp);
   return make_env(code, code == Protocol::SERVICE_SUCCESS ? json(rsp)
@@ -205,18 +190,14 @@ asio::awaitable<void> Channel::handle_message(std::string &msg) {
   Protocol::Envelope responseEnv = make_env(Protocol::SYSTEM_ERROR);
 
   try {
-    const auto &commandTable = command_table();
     auto j = json::parse(msg);
-    Protocol::CommandType type = j.value("type", Protocol::CommandType::ERROR);
-
-    auto it = std::find_if(
-        commandTable.begin(), commandTable.end(),
-        [type](const CommandDescriptor &entry) { return entry.type == type; });
-
-    if (it == commandTable.end())
-      responseEnv = make_env(Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST);
-    else
-      responseEnv = it->dispatch(*this, j);
+    if (auto *loginServer = dynamic_cast<LoginServer *>(server.get())) {
+      responseEnv = loginServer->dispatch_request(j);
+    } else if (auto *homeServer = dynamic_cast<HomeServer *>(server.get())) {
+      responseEnv = homeServer->dispatch_request(j);
+    } else {
+      responseEnv = server->dispatch_request(j);
+    }
 
   } catch (const std::exception &e) {
     logging::log("Parse or dispatch failed: {}", e.what());
