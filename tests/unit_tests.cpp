@@ -5,28 +5,12 @@
 
 #include <asio/io_context.hpp>
 
-#include "channel.h"
 #include "protocol.h"
 #include "room.h"
 #include "server.h"
 #include "user.h"
 
 namespace {
-
-class TestChannel : public Channel {
-public:
-  TestChannel(asio::io_context &context, std::shared_ptr<Server> server)
-      : Channel(context, std::move(server)) {}
-
-  using Channel::make_env;
-  using Channel::on_create_room;
-  using Channel::on_heartbeat;
-  using Channel::on_join_room;
-  using Channel::on_leave_room;
-  using Channel::on_list_rooms;
-  using Channel::on_login;
-  using Channel::on_register;
-};
 
 class ServerChannelBehaviorTest : public ::testing::Test {
 protected:
@@ -40,15 +24,8 @@ protected:
     ioContext.reset();
   }
 
-  void SetUp() override {
-    ch1 = std::make_shared<TestChannel>(*ioContext, server);
-    ch2 = std::make_shared<TestChannel>(*ioContext, server);
-  }
-
   static std::unique_ptr<asio::io_context> ioContext;
   static std::shared_ptr<Server> server;
-  std::shared_ptr<TestChannel> ch1;
-  std::shared_ptr<TestChannel> ch2;
 };
 
 std::unique_ptr<asio::io_context> ServerChannelBehaviorTest::ioContext;
@@ -145,34 +122,60 @@ TEST(RoomTest, BasicBehavior) {
 
 TEST_F(ServerChannelBehaviorTest, ServerRegisterLoginAndRoomLifecycle) {
   Protocol::RegisterRsp aliceRegRsp;
-  ASSERT_EQ(server->register_user(aliceRegRsp), Protocol::SERVICE_SUCCESS);
+  ASSERT_EQ(server->register_user(
+                Protocol::LoginReq{.type = Protocol::LoginRequestType::REGISTER,
+                                   .uid = ""},
+                aliceRegRsp),
+            Protocol::SERVICE_SUCCESS);
   const auto aliceUid = aliceRegRsp.uid;
   ASSERT_FALSE(aliceUid.empty());
   EXPECT_TRUE(server->user_exists(aliceUid));
 
   Protocol::LoginRsp aliceLoginRsp;
-  ASSERT_EQ(server->login_user(aliceUid, aliceLoginRsp),
+  ASSERT_EQ(server->login_user(
+                Protocol::LoginReq{.type = Protocol::LoginRequestType::LOGIN,
+                                   .uid = aliceUid},
+                aliceLoginRsp),
             Protocol::SERVICE_SUCCESS);
   EXPECT_EQ(aliceLoginRsp.basicInfo.uid, aliceUid);
 
   Protocol::CreateRoomRsp createRsp;
-  ASSERT_EQ(server->create_room(2, aliceUid, createRsp),
+  ASSERT_EQ(server->create_room(
+                Protocol::CreateRoomReq{
+                    .type = Protocol::HomeRequestType::CREATE_ROOM,
+                    .uid = aliceUid,
+                    .maximumPeople = 2,
+                },
+                createRsp),
             Protocol::SERVICE_SUCCESS);
   const auto roomId = createRsp.roomId;
   EXPECT_GT(roomId, 0);
 
   Protocol::RegisterRsp bobRegRsp;
-  ASSERT_EQ(server->register_user(bobRegRsp), Protocol::SERVICE_SUCCESS);
+  ASSERT_EQ(server->register_user(
+                Protocol::LoginReq{.type = Protocol::LoginRequestType::REGISTER,
+                                   .uid = ""},
+                bobRegRsp),
+            Protocol::SERVICE_SUCCESS);
   const auto bobUid = bobRegRsp.uid;
   ASSERT_FALSE(bobUid.empty());
 
   Protocol::JoinRoomRsp joinRsp;
-  ASSERT_EQ(server->join_room(roomId, bobUid, joinRsp),
-            Protocol::SERVICE_SUCCESS);
+  ASSERT_EQ(
+      server->join_room(
+          Protocol::JoinRoomReq{.type = Protocol::HomeRequestType::JOIN_ROOM,
+                                .roomId = roomId,
+                                .uid = bobUid},
+          joinRsp),
+      Protocol::SERVICE_SUCCESS);
   EXPECT_EQ(joinRsp.playerInfos.size(), 2U);
 
   Protocol::ListRoomsRsp listRsp;
-  ASSERT_EQ(server->list_rooms(listRsp), Protocol::SERVICE_SUCCESS);
+  ASSERT_EQ(
+      server->list_rooms(
+          Protocol::ListRoomsReq{.type = Protocol::HomeRequestType::LIST_ROOMS},
+          listRsp),
+      Protocol::SERVICE_SUCCESS);
   auto rooms = listRsp.roomInfos;
   ASSERT_FALSE(rooms.empty());
   bool found = false;
@@ -185,29 +188,28 @@ TEST_F(ServerChannelBehaviorTest, ServerRegisterLoginAndRoomLifecycle) {
   }
   EXPECT_TRUE(found);
 
-  EXPECT_EQ(server->leave_room(bobUid), Protocol::SERVICE_SUCCESS);
-  EXPECT_EQ(server->leave_room(aliceUid), Protocol::SERVICE_SUCCESS);
+  Protocol::EmptyRsp leaveRsp;
+  EXPECT_EQ(
+      server->leave_room(
+          Protocol::LeaveRoomReq{.type = Protocol::HomeRequestType::LEAVE_ROOM,
+                                 .uid = bobUid},
+          leaveRsp),
+      Protocol::SERVICE_SUCCESS);
+  EXPECT_EQ(
+      server->leave_room(
+          Protocol::LeaveRoomReq{.type = Protocol::HomeRequestType::LEAVE_ROOM,
+                                 .uid = aliceUid},
+          leaveRsp),
+      Protocol::SERVICE_SUCCESS);
 
   Protocol::ListRoomsRsp finalListRsp;
-  ASSERT_EQ(server->list_rooms(finalListRsp), Protocol::SERVICE_SUCCESS);
+  ASSERT_EQ(
+      server->list_rooms(
+          Protocol::ListRoomsReq{.type = Protocol::HomeRequestType::LIST_ROOMS},
+          finalListRsp),
+      Protocol::SERVICE_SUCCESS);
   auto finalRooms = finalListRsp.roomInfos;
   EXPECT_TRUE(finalRooms.empty());
-}
-
-TEST_F(ServerChannelBehaviorTest, ChannelParsesTypeAndBuildsEnvelope) {
-  auto ok =
-      TestChannel::make_env(Protocol::SERVICE_SUCCESS, json{{"count", 1}});
-  EXPECT_EQ(ok.code, Protocol::SERVICE_SUCCESS);
-  EXPECT_EQ(ok.data.at("count"), 1);
-  EXPECT_EQ(ok.message, "ok");
-
-  auto err =
-      TestChannel::make_env(Protocol::SERVICE_FAIL | Protocol::NOT_FOUND);
-  EXPECT_EQ(err.code, (Protocol::SERVICE_FAIL | Protocol::NOT_FOUND));
-  EXPECT_EQ(err.message, "not found");
-
-  auto unknown = TestChannel::make_env(Protocol::SYSTEM_ERROR);
-  EXPECT_EQ(unknown.message, "error");
 }
 
 TEST(ServerDispatchTest, DerivedServerDispatchRouting) {
@@ -238,70 +240,13 @@ TEST(ServerDispatchTest, DerivedServerDispatchRouting) {
             (Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST));
 }
 
-TEST_F(ServerChannelBehaviorTest, ChannelTypedHandlersFlowAndErrors) {
-  Protocol::LoginReq badRegisterReq{
-      .type = Protocol::LoginRequestType::REGISTER, .uid = "not-empty"};
-  auto badRegisterEnv = ch1->on_register(badRegisterReq);
-  EXPECT_EQ(badRegisterEnv.code,
-            (Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST));
-
-  Protocol::LoginReq registerReq{.type = Protocol::LoginRequestType::REGISTER,
-                                 .uid = ""};
-  auto registerEnv = ch1->on_login(registerReq);
-  ASSERT_EQ(registerEnv.code, Protocol::SERVICE_SUCCESS);
-  auto registerRsp = registerEnv.data.get<Protocol::RegisterRsp>();
-  ASSERT_FALSE(registerRsp.uid.empty());
-
-  Protocol::CreateRoomReq createReq{.type =
-                                        Protocol::HomeRequestType::CREATE_ROOM,
-                                    .uid = registerRsp.uid,
-                                    .maximumPeople = 2};
-  auto createEnv = ch1->on_create_room(createReq);
-  ASSERT_EQ(createEnv.code, Protocol::SERVICE_SUCCESS);
-  auto createRsp = createEnv.data.get<Protocol::CreateRoomRsp>();
-
-  Protocol::RegisterRsp bobRegRsp;
-  ASSERT_EQ(server->register_user(bobRegRsp), Protocol::SERVICE_SUCCESS);
-
-  Protocol::JoinRoomReq joinReq{.type = Protocol::HomeRequestType::JOIN_ROOM,
-                                .roomId = createRsp.roomId,
-                                .uid = bobRegRsp.uid};
-  auto joinEnv = ch2->on_join_room(joinReq);
-  ASSERT_EQ(joinEnv.code, Protocol::SERVICE_SUCCESS);
-  auto joinRsp = joinEnv.data.get<Protocol::JoinRoomRsp>();
-  EXPECT_EQ(joinRsp.playerInfos.size(), 2U);
-
-  auto listEnv = ch1->on_list_rooms(
-      Protocol::ListRoomsReq{.type = Protocol::HomeRequestType::LIST_ROOMS});
-  ASSERT_EQ(listEnv.code, Protocol::SERVICE_SUCCESS);
-  auto listRsp = listEnv.data.get<Protocol::ListRoomsRsp>();
-  EXPECT_FALSE(listRsp.roomInfos.empty());
-
-  auto hbOk = ch1->on_heartbeat(Protocol::HeartbeatReq{
-      .type = Protocol::HomeRequestType::HEARTBEAT, .uid = registerRsp.uid});
-  EXPECT_EQ(hbOk.code, Protocol::SERVICE_SUCCESS);
-
-  auto hbBad = ch1->on_heartbeat(Protocol::HeartbeatReq{
-      .type = Protocol::HomeRequestType::HEARTBEAT, .uid = "does-not-exist"});
-  EXPECT_EQ(hbBad.code, (Protocol::SERVICE_FAIL | Protocol::NOT_FOUND));
-
-  auto leaveBob = ch2->on_leave_room(Protocol::LeaveRoomReq{
-      .type = Protocol::HomeRequestType::LEAVE_ROOM, .uid = bobRegRsp.uid});
-  EXPECT_EQ(leaveBob.code, Protocol::SERVICE_SUCCESS);
-
-  auto leaveAlice = ch1->on_leave_room(Protocol::LeaveRoomReq{
-      .type = Protocol::HomeRequestType::LEAVE_ROOM, .uid = registerRsp.uid});
-  EXPECT_EQ(leaveAlice.code, Protocol::SERVICE_SUCCESS);
-
-  auto leaveAgain = ch1->on_leave_room(Protocol::LeaveRoomReq{
-      .type = Protocol::HomeRequestType::LEAVE_ROOM, .uid = registerRsp.uid});
-  EXPECT_EQ(leaveAgain.code,
-            (Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR));
-}
-
 TEST_F(ServerChannelBehaviorTest, LoginAfterLogoutUsesStoredProfile) {
   Protocol::RegisterRsp registerRsp;
-  ASSERT_EQ(server->register_user(registerRsp), Protocol::SERVICE_SUCCESS);
+  ASSERT_EQ(server->register_user(
+                Protocol::LoginReq{.type = Protocol::LoginRequestType::REGISTER,
+                                   .uid = ""},
+                registerRsp),
+            Protocol::SERVICE_SUCCESS);
   const std::string uid = registerRsp.uid;
   ASSERT_FALSE(uid.empty());
   server->logout_user(uid);
@@ -310,7 +255,11 @@ TEST_F(ServerChannelBehaviorTest, LoginAfterLogoutUsesStoredProfile) {
   EXPECT_EQ(server->get_user(uid), nullptr);
 
   Protocol::LoginRsp relogged;
-  ASSERT_EQ(server->login_user(uid, relogged), Protocol::SERVICE_SUCCESS);
+  ASSERT_EQ(server->login_user(
+                Protocol::LoginReq{.type = Protocol::LoginRequestType::LOGIN,
+                                   .uid = uid},
+                relogged),
+            Protocol::SERVICE_SUCCESS);
   EXPECT_EQ(relogged.basicInfo.uid, uid);
   EXPECT_EQ(relogged.basicInfo.userName, "");
 }

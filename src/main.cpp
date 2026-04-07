@@ -33,7 +33,6 @@ bool try_parse_port(std::string_view value, int &port) {
   if (value.empty()) {
     return false;
   }
-
   try {
     const int parsed = std::stoi(std::string(value));
     if (parsed < 1 || parsed > 65535) {
@@ -47,13 +46,10 @@ bool try_parse_port(std::string_view value, int &port) {
 }
 
 void print_usage() {
-  std::cerr << "Usage: server --auth-port <1-65535> --lobby-port <1-65535>\n"
-            << "You can also use SERVER_AUTH_PORT and SERVER_LOBBY_PORT "
-               "environment variables.\n";
+  logging::log("Usage: server --auth-port <1-65535> --lobby-port <1-65535>");
 }
 
-ParseResult parse_args(int argc, char **argv) {
-  RuntimeConfig cfg;
+ParseStatus parse_args(int argc, char **argv, RuntimeConfig &cfg) {
   static option longOptions[] = {
       {"auth-port", required_argument, nullptr, 'a'},
       {"lobby-port", required_argument, nullptr, 'l'},
@@ -73,14 +69,14 @@ ParseResult parse_args(int argc, char **argv) {
 
     if (opt == 'h') {
       print_usage();
-      return {.status = ParseStatus::Help, .config = cfg};
+      return ParseStatus::Help;
     }
 
     if (opt == 'a' || opt == 'l') {
       int port = 0;
       if (!try_parse_port(optarg, port)) {
         print_usage();
-        return {.status = ParseStatus::Error, .config = cfg};
+        return ParseStatus::Error;
       }
 
       if (opt == 'a') {
@@ -90,39 +86,15 @@ ParseResult parse_args(int argc, char **argv) {
       }
       continue;
     }
-
     print_usage();
-    return {.status = ParseStatus::Error, .config = cfg};
+    return ParseStatus::Error;
   }
 
   if (optind < argc) {
     print_usage();
-    return {.status = ParseStatus::Error, .config = cfg};
+    return ParseStatus::Error;
   }
-
-  return {.status = ParseStatus::Ok, .config = cfg};
-}
-
-void apply_env_fallback(RuntimeConfig &cfg) {
-  if (!cfg.authPort.has_value()) {
-    const char *authEnv = std::getenv("SERVER_AUTH_PORT");
-    if (authEnv != nullptr) {
-      int port = 0;
-      if (try_parse_port(authEnv, port)) {
-        cfg.authPort = port;
-      }
-    }
-  }
-
-  if (!cfg.lobbyPort.has_value()) {
-    const char *lobbyEnv = std::getenv("SERVER_LOBBY_PORT");
-    if (lobbyEnv != nullptr) {
-      int port = 0;
-      if (try_parse_port(lobbyEnv, port)) {
-        cfg.lobbyPort = port;
-      }
-    }
-  }
+  return ParseStatus::Ok;
 }
 
 bool validate_config(const RuntimeConfig &cfg) {
@@ -130,29 +102,24 @@ bool validate_config(const RuntimeConfig &cfg) {
     print_usage();
     return false;
   }
-
   if (cfg.authPort == cfg.lobbyPort) {
-    std::cerr << "auth and lobby ports must be different\n";
+    logging::log("auth and lobby ports must be different");
     return false;
   }
-
   return true;
 }
-
 } // namespace
 
 int main(int argc, char **argv) {
   try {
-    ParseResult parsed = parse_args(argc, argv);
-    if (parsed.status == ParseStatus::Help) {
+    RuntimeConfig cfg;
+    ParseStatus status = parse_args(argc, argv, cfg);
+    if (status == ParseStatus::Help) {
       return 0;
     }
-    if (parsed.status == ParseStatus::Error) {
+    if (status == ParseStatus::Error) {
       return 1;
     }
-
-    RuntimeConfig cfg = parsed.config;
-    apply_env_fallback(cfg);
     if (!validate_config(cfg)) {
       return 1;
     }
@@ -163,8 +130,6 @@ int main(int argc, char **argv) {
         std::make_shared<LoginServer>(io_context, *cfg.authPort, sharedState);
     auto lobbyServer =
         std::make_shared<HomeServer>(io_context, *cfg.lobbyPort, sharedState);
-    (void)authServer;
-    (void)lobbyServer;
 
     logging::log("Auth service listening on port {}", *cfg.authPort);
     logging::log("Lobby service listening on port {}", *cfg.lobbyPort);
@@ -172,7 +137,7 @@ int main(int argc, char **argv) {
     io_context.run();
 
   } catch (std::exception &e) {
-    std::cerr << e.what() << std::endl;
+    logging::log("{}", e.what());
   }
 
   return 0;

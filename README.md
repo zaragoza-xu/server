@@ -1,101 +1,109 @@
 # server
 
-一个基于 ASIO 协程的轻量级 TCP 聊天房间服务端。
+基于 standalone Asio 协程的轻量级 TCP 房间服务端。
 
-## 项目简介
+## 功能概览
 
-本项目实现了一个 JSON 协议的 TCP 服务端，核心能力包括：
+- 登录域命令：`LOGIN`、`REGISTER`
+- 大厅域命令：`CREATE_ROOM`、`JOIN_ROOM`、`LEAVE_ROOM`、`LIST_ROOMS`、`HEARTBEAT`
+- 统一响应信封：`Envelope{code, message, data}`
+- 用户与房间状态由 `ServerState` 维护，并在两个服务实例间共享
 
-- 用户注册（REGISTER）
-- 用户登录（LOGIN）
-- 创建房间（CREATE_ROOM）
-- 加入房间（JOIN_ROOM）
-- 离开房间（LEAVE_ROOM）
-- 列出房间（LIST_ROOMS）
+## 当前协议（与代码一致）
 
-当前协议约定：
+### 1. 消息格式
 
-- 消息类型 `type` 使用字符串（例如 `"login"`、`"create_room"`）
-- 信封字段使用 `data` 承载业务数据
-- 统一返回结构由 `Envelope` 描述（`code/message/data`）
-- `code` 使用位掩码：低位表示成功/失败/系统错误，高位表示具体错误细节
+- 传输层：TCP 文本帧，每条消息以换行符 `\n` 结尾
+- 负载：JSON
+- 最大消息长度：`Protocol::MAX_MESSAGE_SIZE = 65536`
 
-## 目录概览
+### 2. 命令类型
 
-- `include/` 头文件与协议定义
-- `src/` 业务实现
-- `scripts/build-release.sh` 一键构建脚本
-- `CMakeLists.txt` CMake 构建配置
-- `CMakePresets.json` 预设构建配置（release + Ninja + vcpkg）
+`type` 字段是枚举数值，不是字符串。
 
-## 依赖要求
+登录域 `Protocol::LoginRequestType`：
+
+- `LOGIN = 0`
+- `REGISTER = 1`
+- `ERROR = 100`
+
+大厅域 `Protocol::HomeRequestType`：
+
+- `CREATE_ROOM = 0`
+- `JOIN_ROOM = 1`
+- `LEAVE_ROOM = 2`
+- `LIST_ROOMS = 3`
+- `SEND_MESSAGE = 4`（协议定义保留，服务端未打通）
+- `HEARTBEAT = 5`
+- `EDIT_PROFILE = 6`（协议定义保留，服务端未打通）
+- `ERROR = 100`
+
+### 3. 返回结构
+
+统一返回：
+
+```json
+{
+  "code": 1,
+  "message": "ok",
+  "data": {}
+}
+```
+
+- `code`：位掩码错误码（见 `Protocol::Code`）
+- `message`：由 `Envelope::map_message_from_code` 映射
+- `data`：成功时放业务响应，空响应命令返回空对象
+
+### 4. 当前请求/响应类型
+
+请求：
+
+- `LoginReq`
+- `CreateRoomReq`
+- `JoinRoomReq`
+- `LeaveRoomReq`
+- `ListRoomsReq`
+- `HeartbeatReq`
+
+响应：
+
+- `RegisterRsp`
+- `LoginRsp`
+- `CreateRoomRsp`
+- `JoinRoomRsp`
+- `ListRoomsRsp`
+- `EmptyRsp`（无业务数据返回的占位类型）
+
+## 项目结构
+
+- `include/protocol.h`：协议类型、错误码、JSON 序列化定义
+- `include/server.h`：`Server`/`LoginServer`/`HomeServer` 接口与命令分发表
+- `include/channel.h`：连接读写与消息处理接口
+- `src/server.cpp`：连接接入、状态机和业务方法实现
+- `src/channel.cpp`：按行分帧、JSON 解析、分发调用
+- `src/main.cpp`：参数解析、实例启动
+- `tests/unit_tests.cpp`：单元测试
+
+## 构建
+
+依赖要求：
 
 - CMake 3.21+
 - C++20 编译器
 - Ninja（推荐）
-- 库依赖：
-  - `asio`
-  - `nlohmann_json`
-  - `GTest`（仅单元测试需要）
+- `asio`、`nlohmann_json`、`GTest`（测试）
 
-说明：
-
-- 默认开启 `SERVER_FETCH_DEPS=ON`，在本机缺少依赖时，CMake 会自动下载并集成这些库。
-- 如果你已经通过系统包管理器或 vcpkg 安装了依赖，可关闭自动下载：
-
-```bash
-cmake -S . -B build -DSERVER_FETCH_DEPS=OFF
-```
-
-## 构建方式
-
-### 方式一：使用 CMake Preset（推荐）
+默认 `SERVER_FETCH_DEPS=ON`，缺失依赖时自动下载。
 
 ```bash
 cmake --preset release
 cmake --build build
 ```
 
-如果你希望继续使用 vcpkg 工具链 preset：
+## 测试
 
 ```bash
-cmake --preset release-vcpkg
-cmake --build --preset release-vcpkg
-```
-
-### 方式二：使用脚本
-
-```bash
-./scripts/build-release.sh
-```
-
-可透传构建参数，例如并行数：
-
-```bash
-./scripts/build-release.sh -j8
-```
-
-### 方式三：手动 CMake（不使用 preset）
-
-如果你已自行配置工具链，也可以直接：
-
-```bash
-cmake -S . -B build
-cmake --build build
-```
-
-## 单元测试
-
-构建（默认会构建 `unit_tests`）：
-
-```bash
-cmake --preset release
 cmake --build build --target unit_tests
-```
-
-运行：
-
-```bash
 ctest --test-dir build --output-on-failure
 ```
 
@@ -105,22 +113,27 @@ ctest --test-dir build --output-on-failure
 ./build/server --auth-port 8765 --lobby-port 8766
 ```
 
-说明：
-
-- 认证端口（auth）：处理登录/注册请求（`LOGIN`，`uid` 为空时视为注册）
-- 大厅端口（lobby）：处理联机大厅请求（创建/加入/离开/列房间/心跳）
+- `auth-port` 处理 `LOGIN/REGISTER`
+- `lobby-port` 处理房间与心跳命令
 - 两个端口必须不同
 
-## 快速测试
+## 示例请求
 
-可用 `nc` 连接测试（每条 JSON 末尾换行）：
+注册：
+
+```json
+{"type":1,"uid":""}
+```
+
+创建房间：
+
+```json
+{"type":0,"uid":"1001","maximumPeople":4}
+```
+
+使用 `nc` 快速调试（每条 JSON 后换行）：
 
 ```bash
 nc 127.0.0.1 8765
-```
-
-大厅端口示例：
-
-```bash
 nc 127.0.0.1 8766
 ```

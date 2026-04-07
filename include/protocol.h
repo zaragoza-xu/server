@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <string>
 #include <string_view>
@@ -64,6 +65,38 @@ struct Envelope {
   json data = json::object();
 
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Envelope, code, message, data)
+
+  struct CodeMessageEntry {
+    int mask;
+    const char *message;
+  };
+
+  static constexpr std::array<CodeMessageEntry, 4> CODE_MESSAGE_TABLE{{
+      {Protocol::NOT_FOUND, "not found"},
+      {Protocol::ROOM_STATE_ERROR, "room state error"},
+      {Protocol::BAD_REQUEST, "bad request"},
+      {Protocol::DESERIALIZE_FAIL, "deserialize failed"},
+  }};
+
+  static std::string map_message_from_code(int code) {
+    if (code == Protocol::SERVICE_SUCCESS) {
+      return "ok";
+    }
+    for (const auto &entry : CODE_MESSAGE_TABLE) {
+      if ((code & entry.mask) != 0) {
+        return entry.message;
+      }
+    }
+    return "error";
+  }
+  static Protocol::Envelope make_env(int code,
+                                     const json &data = json::object()) {
+    Protocol::Envelope env;
+    env.code = code;
+    env.message = map_message_from_code(code);
+    env.data = data;
+    return env;
+  }
 };
 
 struct LoginReq {
@@ -122,6 +155,8 @@ struct HeartbeatReq {
 
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(HeartbeatReq, type, uid);
 };
+
+struct EmptyRsp {};
 
 struct RegisterRsp {
   std::string uid;
