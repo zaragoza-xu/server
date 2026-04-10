@@ -1,56 +1,55 @@
 {
-    "version": 3,
-    "cmakeMinimumRequired": {
-        "major": 3,
-        "minor": 21,
-        "patch": 0
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "release",
+      "displayName": "Release",
+      "description": "Release configure with Ninja (portable, auto-fetch deps)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
     },
-    "configurePresets": [
-        {
-            "name": "release",
-            "displayName": "Release",
-            "description": "Release configure with Ninja (portable, auto-fetch deps)",
-            "generator": "Ninja",
-            "binaryDir": "${sourceDir}/build",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release",
-                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-                "SERVER_BUILD_TESTS": "OFF"
-            }
-        },
-        {
-            "name": "debug",
-            "displayName": "Debug",
-            "description": "Debug configure with Ninja (symbols enabled)",
-            "generator": "Ninja",
-            "binaryDir": "${sourceDir}/build/debug",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug",
-                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
-            }
-        },
-        {
-            "name": "release-vcpkg",
-            "displayName": "Release (vcpkg)",
-            "description": "Release configure with Ninja and vcpkg toolchain",
-            "inherits": "release",
-            "cacheVariables": {
-                "CMAKE_TOOLCHAIN_FILE": "$env{HOME}/opt/vcpkg/scripts/buildsystems/vcpkg.cmake"
-            }
-        }
-    ],
-    "buildPresets": [
-        {
-            "name": "release",
-            "configurePreset": "release"
-        },
-        {
-            "name": "debug",
-            "configurePreset": "debug"
-        },
-        {
-            "name": "release-vcpkg",
-            "configurePreset": "release-vcpkg"
-        }
-    ]
+    {
+      "name": "debug",
+      "displayName": "Debug",
+      "description": "Debug configure with Ninja (symbols enabled)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "release-vcpkg",
+      "displayName": "Release (vcpkg)",
+      "description": "Release configure with Ninja and vcpkg toolchain",
+      "inherits": "release",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{HOME}/opt/vcpkg/scripts/buildsystems/vcpkg.cmake"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "debug",
+      "configurePreset": "debug"
+    },
+    {
+      "name": "release-vcpkg",
+      "configurePreset": "release-vcpkg"
+    }
+  ]
 }

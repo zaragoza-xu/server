@@ -17,7 +17,7 @@
 
 ### 1.1 覆盖命令
 
-- 登录域：`REGISTER`、`LOGIN`
+- 登录域：`REGISTER`、`LOGIN`、`LOGOUT`
 - 大厅域：`CREATE_ROOM`、`JOIN_ROOM`、`LEAVE_ROOM`、`LIST_ROOMS`
 
 ### 1.2 快照断言（每个命令都要有）

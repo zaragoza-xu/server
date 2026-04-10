@@ -65,14 +65,13 @@ public:
   // Service APIs: do validation and state transitions atomically.
   int register_user(const Protocol::RegisterReq &, Protocol::RegisterRsp &);
   int login_user(const Protocol::LoginReq &, Protocol::LoginRsp &);
-  int create_room(const Protocol::CreateRoomReq &,
-                  Protocol::CreateRoomRsp &rsp);
-  int join_room(const Protocol::JoinRoomReq &, Protocol::JoinRoomRsp &rsp);
+  int create_room(const Protocol::CreateRoomReq &, Protocol::CreateRoomRsp &);
+  int join_room(const Protocol::JoinRoomReq &, Protocol::JoinRoomRsp &);
   int leave_room(const Protocol::LeaveRoomReq &, Protocol::EmptyRsp &);
-  int list_rooms(const Protocol::ListRoomsReq &, Protocol::ListRoomsRsp &rsp);
+  int list_rooms(const Protocol::ListRoomsReq &, Protocol::ListRoomsRsp &);
+  int logout_user(const Protocol::LogoutReq &, Protocol::EmptyRsp &);
 
   // Internal/user lifecycle helpers.
-  void logout_user(const std::string &uid);
   std::shared_ptr<User> get_user(const std::string &uid) const;
   bool user_exists(const std::string &uid) const;
 };
@@ -91,13 +90,16 @@ private:
     Protocol::LoginRequestType type;
     DispatchFn dispatch;
   };
-  const std::array<LoginServer::CommandDescriptor, 2> COMMAND_TABLE{{
+  const std::array<LoginServer::CommandDescriptor, 3> COMMAND_TABLE{{
       {Protocol::LoginRequestType::LOGIN,
        &Server::dispatch_entry<Protocol::LoginReq, Protocol::LoginRsp,
                                &Server::login_user>},
       {Protocol::LoginRequestType::REGISTER,
        &Server::dispatch_entry<Protocol::RegisterReq, Protocol::RegisterRsp,
                                &Server::register_user>},
+      {Protocol::LoginRequestType::LOGOUT,
+       &Server::dispatch_entry<Protocol::LogoutReq, Protocol::EmptyRsp,
+                               &Server::logout_user>},
   }};
 };
 

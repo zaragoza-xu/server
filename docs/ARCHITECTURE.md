@@ -38,6 +38,7 @@
 - `Server` 作为基类，提供业务 API：
   - `register_user`
   - `login_user`
+  - `logout_user`
   - `create_room`
   - `join_room`
   - `leave_room`
@@ -69,7 +70,7 @@
 
 `type` 为枚举数值：
 
-- 登录域：`LOGIN=0`、`REGISTER=1`、`ERROR=100`
+- 登录域：`LOGIN=0`、`REGISTER=1`、`LOGOUT=2`、`ERROR=100`
 - 大厅域：
   - `CREATE_ROOM=0`
   - `JOIN_ROOM=1`
@@ -101,12 +102,14 @@
 
 `Server` 公开业务接口签名如下：
 
-- `int register_user(const Protocol::LoginReq&, Protocol::RegisterRsp&)`
+- `int register_user(const Protocol::RegisterReq&, Protocol::RegisterRsp&)`
 - `int login_user(const Protocol::LoginReq&, Protocol::LoginRsp&)`
+- `int logout_user(const Protocol::LogoutReq&, Protocol::EmptyRsp&)`
 - `int create_room(const Protocol::CreateRoomReq&, Protocol::CreateRoomRsp&)`
 - `int join_room(const Protocol::JoinRoomReq&, Protocol::JoinRoomRsp&)`
 - `int leave_room(const Protocol::LeaveRoomReq&, Protocol::EmptyRsp&)`
 - `int list_rooms(const Protocol::ListRoomsReq&, Protocol::ListRoomsRsp&)`
+- `int logout_user(const Protocol::LogoutReq &, Protocol::EmptyRsp &);`
 
 说明：当前 `Channel` 不再保留旧的 `on_*` typed handlers 路径，统一走 `dispatch_request`。
 
@@ -122,7 +125,7 @@
 
 已实现：
 
-- 登录/注册
+- 登录/注册/登出
 - 创建房间/加入房间/离开房间/列房间
 
 预留未打通：

@@ -66,8 +66,6 @@ int Server::register_user(const Protocol::RegisterReq &req,
   storedInfo.uid = std::to_string(state->nextUid++);
   state->userInfos.emplace(storedInfo.uid, storedInfo);
 
-  auto user = std::make_shared<User>(storedInfo);
-  state->users[storedInfo.uid] = user;
   rsp.uid = storedInfo.uid;
   return Protocol::SERVICE_SUCCESS;
 }
@@ -93,33 +91,40 @@ int Server::login_user(const Protocol::LoginReq &req, Protocol::LoginRsp &rsp) {
   return Protocol::SERVICE_SUCCESS;
 }
 
-void Server::logout_user(const std::string &uid) {
+int Server::logout_user(const Protocol::LogoutReq &req, Protocol::EmptyRsp &) {
+  if (req.uid.empty()) {
+    return Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST;
+  }
+
   std::shared_ptr<User> user;
   std::scoped_lock lock(state->usersMutex, state->roomsMutex);
-  auto it = state->users.find(uid);
+  auto it = state->users.find(req.uid);
   if (it == state->users.end()) {
-    return;
+    return Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST;
   }
   user = it->second;
-  state->users.erase(it);
 
   if (user && user->is_in_room()) {
     const int room_id = user->get_room_id();
     auto it = state->rooms.find(room_id);
     if (it == state->rooms.end()) {
-      return;
+      return Protocol::ERROR | Protocol::ROOM_STATE_ERROR;
     }
     auto room = it->second;
-    if (!room->is_member(uid)) {
-      return;
+    if (!room->is_member(req.uid)) {
+      return Protocol::ERROR | Protocol::ROOM_STATE_ERROR;
     }
 
-    room->remove_member(uid);
+    room->remove_member(req.uid);
     user->set_room_id(-1);
     if (room->get_people_count() == 0) {
       state->rooms.erase(it);
     }
   }
+
+  state->users.erase(it);
+
+  return Protocol::SERVICE_SUCCESS;
 }
 
 std::shared_ptr<User> Server::get_user(const std::string &uid) const {

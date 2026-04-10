@@ -37,6 +37,7 @@ TEST(ProtocolTest, CommandTypeMapping) {
 
   EXPECT_EQ(static_cast<int>(LoginRequestType::LOGIN), 0);
   EXPECT_EQ(static_cast<int>(LoginRequestType::REGISTER), 1);
+  EXPECT_EQ(static_cast<int>(LoginRequestType::LOGOUT), 2);
   EXPECT_EQ(static_cast<int>(LoginRequestType::ERROR), 100);
 
   EXPECT_EQ(static_cast<int>(HomeRequestType::CREATE_ROOM), 0);
@@ -182,6 +183,22 @@ TEST_F(ServerChannelBehaviorTest, ServerRegisterLoginAndRoomLifecycle) {
   ASSERT_FALSE(bobUid.empty());
 
   Protocol::JoinRoomRsp joinRsp;
+  EXPECT_EQ(
+      server->join_room(
+          Protocol::JoinRoomReq{.type = Protocol::HomeRequestType::JOIN_ROOM,
+                                .roomId = roomId,
+                                .uid = bobUid},
+          joinRsp),
+      (Protocol::SERVICE_FAIL | Protocol::NOT_FOUND));
+
+  Protocol::LoginRsp bobLoginRsp;
+  ASSERT_EQ(server->login_user(
+                Protocol::LoginReq{.type = Protocol::LoginRequestType::LOGIN,
+                                   .uid = bobUid},
+                bobLoginRsp),
+            Protocol::SERVICE_SUCCESS);
+  EXPECT_EQ(bobLoginRsp.playerData.basicInfo.uid, bobUid);
+
   ASSERT_EQ(
       server->join_room(
           Protocol::JoinRoomReq{.type = Protocol::HomeRequestType::JOIN_ROOM,
@@ -249,6 +266,31 @@ TEST(ServerDispatchTest, DerivedServerDispatchRouting) {
   const auto uid = registerEnv.data.get<Protocol::RegisterRsp>().uid;
   ASSERT_FALSE(uid.empty());
 
+  auto logoutBeforeLogin =
+      loginServer->dispatch_request(json(Protocol::LogoutReq{
+          .type = Protocol::LoginRequestType::LOGOUT, .uid = uid}));
+  EXPECT_EQ(logoutBeforeLogin.code,
+            (Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST));
+
+  auto reloginEnv = loginServer->dispatch_request(json(Protocol::LoginReq{
+      .type = Protocol::LoginRequestType::LOGIN, .uid = uid}));
+  EXPECT_EQ(reloginEnv.code, Protocol::SERVICE_SUCCESS);
+
+  auto duplicateLoginEnv =
+      loginServer->dispatch_request(json(Protocol::LoginReq{
+          .type = Protocol::LoginRequestType::LOGIN, .uid = uid}));
+  EXPECT_EQ(duplicateLoginEnv.code,
+            (Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST));
+
+  auto logoutEnv = loginServer->dispatch_request(json(Protocol::LogoutReq{
+      .type = Protocol::LoginRequestType::LOGOUT, .uid = uid}));
+  EXPECT_EQ(logoutEnv.code, Protocol::SERVICE_SUCCESS);
+
+  auto loginAfterLogoutEnv =
+      loginServer->dispatch_request(json(Protocol::LoginReq{
+          .type = Protocol::LoginRequestType::LOGIN, .uid = uid}));
+  EXPECT_EQ(loginAfterLogoutEnv.code, Protocol::SERVICE_SUCCESS);
+
   auto badOnLoginServer = loginServer->dispatch_request(json(
       Protocol::ListRoomsReq{.type = Protocol::HomeRequestType::LIST_ROOMS}));
   EXPECT_EQ(badOnLoginServer.code,
@@ -275,10 +317,6 @@ TEST_F(ServerChannelBehaviorTest, LoginAfterLogoutUsesStoredProfile) {
             Protocol::SERVICE_SUCCESS);
   const std::string uid = registerRsp.uid;
   ASSERT_FALSE(uid.empty());
-  server->logout_user(uid);
-
-  EXPECT_TRUE(server->user_exists(uid));
-  EXPECT_EQ(server->get_user(uid), nullptr);
 
   Protocol::LoginRsp relogged;
   ASSERT_EQ(server->login_user(
@@ -288,6 +326,16 @@ TEST_F(ServerChannelBehaviorTest, LoginAfterLogoutUsesStoredProfile) {
             Protocol::SERVICE_SUCCESS);
   EXPECT_EQ(relogged.playerData.basicInfo.uid, uid);
   EXPECT_EQ(relogged.playerData.basicInfo.name, "");
+
+  Protocol::EmptyRsp logoutRsp;
+  ASSERT_EQ(server->logout_user(
+                Protocol::LogoutReq{.type = Protocol::LoginRequestType::LOGOUT,
+                                    .uid = uid},
+                logoutRsp),
+            Protocol::SERVICE_SUCCESS);
+
+  EXPECT_TRUE(server->user_exists(uid));
+  EXPECT_EQ(server->get_user(uid), nullptr);
 }
 
 } // namespace
