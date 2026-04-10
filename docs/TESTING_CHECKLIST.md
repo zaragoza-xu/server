@@ -17,8 +17,8 @@
 
 ### 1.1 覆盖命令
 
-- 登录域：`REGISTER`、`LOGIN`
-- 大厅域：`CREATE_ROOM`、`JOIN_ROOM`、`LEAVE_ROOM`、`LIST_ROOMS`、`HEARTBEAT`
+- 登录域：`REGISTER`、`LOGIN`、`LOGOUT`
+- 大厅域：`CREATE_ROOM`、`JOIN_ROOM`、`LEAVE_ROOM`、`LIST_ROOMS`
 
 ### 1.2 快照断言（每个命令都要有）
 
@@ -60,13 +60,13 @@
 
 - 客户端主动断连后，服务端不崩溃。
 - 断连后同 uid 重新登录可恢复（符合当前实现约束）。
-- 心跳超时后会话被清理，后续请求返回 NOT_FOUND。
+- 断连与重连交替场景下，不应出现脏会话或幽灵在线状态。
 
 ## 3. 并发一致性测试（P1-P2，高价值）
 
 ### 3.1 并发 join/leave
 
-- 多用户并发加入同一房间，最终 `peopleCount` 与成员列表一致。
+- 多用户并发加入同一房间，最终成员数量与成员列表一致。
 - 同一用户快速 join/leave 重复操作，状态不应损坏。
 - 并发 leave 后空房间应被及时清理。
 
@@ -79,7 +79,7 @@
 ### 3.3 一致性不变量
 
 - 任意时刻用户最多属于一个房间。
-- `rooms` 中成员数与 `peopleCount` 一致。
+- `rooms` 中成员容器大小与成员列表一致。
 - 离房后用户 `room_id` 复位。
 
 ## 4. 分层落地建议

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <array>
-#include <chrono>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -36,13 +35,9 @@ private:
   int port;
   asio::ip::tcp::acceptor acceptor;
   asio::io_context &ioContext;
-  asio::steady_timer heartbeatTimer;
-  std::chrono::seconds heartbeatInterval{5};
-  std::chrono::seconds heartbeatTimeout{30};
   std::shared_ptr<ServerState> state;
 
   asio::awaitable<void> accept_loop();
-  asio::awaitable<void> heartbeat_monitor();
 
 public:
   Server(asio::io_context &context, int port,
@@ -70,15 +65,13 @@ public:
   // Service APIs: do validation and state transitions atomically.
   int register_user(const Protocol::RegisterReq &, Protocol::RegisterRsp &);
   int login_user(const Protocol::LoginReq &, Protocol::LoginRsp &);
-  int create_room(const Protocol::CreateRoomReq &,
-                  Protocol::CreateRoomRsp &rsp);
-  int join_room(const Protocol::JoinRoomReq &, Protocol::JoinRoomRsp &rsp);
+  int create_room(const Protocol::CreateRoomReq &, Protocol::CreateRoomRsp &);
+  int join_room(const Protocol::JoinRoomReq &, Protocol::JoinRoomRsp &);
   int leave_room(const Protocol::LeaveRoomReq &, Protocol::EmptyRsp &);
-  int list_rooms(const Protocol::ListRoomsReq &, Protocol::ListRoomsRsp &rsp);
-  int heartbeat(const Protocol::HeartbeatReq &, Protocol::EmptyRsp &);
+  int list_rooms(const Protocol::ListRoomsReq &, Protocol::ListRoomsRsp &);
+  int logout_user(const Protocol::LogoutReq &, Protocol::EmptyRsp &);
 
   // Internal/user lifecycle helpers.
-  void logout_user(const std::string &uid);
   std::shared_ptr<User> get_user(const std::string &uid) const;
   bool user_exists(const std::string &uid) const;
 };
@@ -97,13 +90,16 @@ private:
     Protocol::LoginRequestType type;
     DispatchFn dispatch;
   };
-  const std::array<LoginServer::CommandDescriptor, 2> COMMAND_TABLE{{
+  const std::array<LoginServer::CommandDescriptor, 3> COMMAND_TABLE{{
       {Protocol::LoginRequestType::LOGIN,
        &Server::dispatch_entry<Protocol::LoginReq, Protocol::LoginRsp,
                                &Server::login_user>},
       {Protocol::LoginRequestType::REGISTER,
        &Server::dispatch_entry<Protocol::RegisterReq, Protocol::RegisterRsp,
                                &Server::register_user>},
+      {Protocol::LoginRequestType::LOGOUT,
+       &Server::dispatch_entry<Protocol::LogoutReq, Protocol::EmptyRsp,
+                               &Server::logout_user>},
   }};
 };
 
@@ -133,8 +129,5 @@ private:
       {Protocol::HomeRequestType::LEAVE_ROOM,
        &Server::dispatch_entry<Protocol::LeaveRoomReq, Protocol::EmptyRsp,
                                &Server::leave_room>},
-      {Protocol::HomeRequestType::HEARTBEAT,
-       &Server::dispatch_entry<Protocol::HeartbeatReq, Protocol::EmptyRsp,
-                               &Server::heartbeat>},
   }};
 };

@@ -4,8 +4,8 @@
 
 ## 功能概览
 
-- 登录域命令：`LOGIN`、`REGISTER`
-- 大厅域命令：`CREATE_ROOM`、`JOIN_ROOM`、`LEAVE_ROOM`、`LIST_ROOMS`、`HEARTBEAT`
+- 登录域命令：`LOGIN`、`REGISTER`、`LOGOUT`
+- 大厅域命令：`CREATE_ROOM`、`JOIN_ROOM`、`LEAVE_ROOM`、`LIST_ROOMS`
 - 统一响应信封：`Envelope{code, message, data}`
 - 用户与房间状态由 `ServerState` 维护，并在两个服务实例间共享
 
@@ -25,6 +25,7 @@
 
 - `LOGIN = 0`
 - `REGISTER = 1`
+- `LOGOUT = 2`
 - `ERROR = 100`
 
 大厅域 `Protocol::HomeRequestType`：
@@ -34,7 +35,6 @@
 - `LEAVE_ROOM = 2`
 - `LIST_ROOMS = 3`
 - `SEND_MESSAGE = 4`（协议定义保留，服务端未打通）
-- `HEARTBEAT = 5`
 - `EDIT_PROFILE = 6`（协议定义保留，服务端未打通）
 - `ERROR = 100`
 
@@ -59,11 +59,11 @@
 请求：
 
 - `LoginReq`
+- `LogoutReq`
 - `CreateRoomReq`
 - `JoinRoomReq`
 - `LeaveRoomReq`
 - `ListRoomsReq`
-- `HeartbeatReq`
 
 响应：
 
@@ -113,8 +113,8 @@ ctest --test-dir build --output-on-failure
 ./build/server --auth-port 8765 --lobby-port 8766
 ```
 
-- `auth-port` 处理 `LOGIN/REGISTER`
-- `lobby-port` 处理房间与心跳命令
+- `auth-port` 处理 `LOGIN/REGISTER/LOGOUT`
+- `lobby-port` 处理房间命令
 - 两个端口必须不同
 
 ## 示例请求

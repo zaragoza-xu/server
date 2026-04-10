@@ -25,13 +25,12 @@ Server::Server(asio::io_context &context, int port,
                std::shared_ptr<ServerState> sharedState)
     : ioContext(context), port(port),
       acceptor(context, tcp::endpoint(tcp::v4(), port)),
-      heartbeatTimer(context), state(std::move(sharedState)) {
+      state(std::move(sharedState)) {
   if (!state) {
     state = std::make_shared<ServerState>();
   }
 
   asio::co_spawn(ioContext, accept_loop(), asio::detached);
-  asio::co_spawn(ioContext, heartbeat_monitor(), asio::detached);
 }
 
 Protocol::Envelope Server::dispatch_request(const json &) {
@@ -67,8 +66,6 @@ int Server::register_user(const Protocol::RegisterReq &req,
   storedInfo.uid = std::to_string(state->nextUid++);
   state->userInfos.emplace(storedInfo.uid, storedInfo);
 
-  auto user = std::make_shared<User>(storedInfo);
-  state->users[storedInfo.uid] = user;
   rsp.uid = storedInfo.uid;
   return Protocol::SERVICE_SUCCESS;
 }
@@ -85,9 +82,7 @@ int Server::login_user(const Protocol::LoginReq &req, Protocol::LoginRsp &rsp) {
   }
   auto onlineIt = state->users.find(req.uid);
   if (onlineIt != state->users.end()) {
-    onlineIt->second->touch_heartbeat();
-    rsp.playerData.basicInfo = onlineIt->second->get_info();
-    return Protocol::SERVICE_SUCCESS;
+    return Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST;
   }
 
   auto user = std::make_shared<User>(infoIt->second);
@@ -96,33 +91,40 @@ int Server::login_user(const Protocol::LoginReq &req, Protocol::LoginRsp &rsp) {
   return Protocol::SERVICE_SUCCESS;
 }
 
-void Server::logout_user(const std::string &uid) {
+int Server::logout_user(const Protocol::LogoutReq &req, Protocol::EmptyRsp &) {
+  if (req.uid.empty()) {
+    return Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST;
+  }
+
   std::shared_ptr<User> user;
   std::scoped_lock lock(state->usersMutex, state->roomsMutex);
-  auto it = state->users.find(uid);
+  auto it = state->users.find(req.uid);
   if (it == state->users.end()) {
-    return;
+    return Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST;
   }
   user = it->second;
-  state->users.erase(it);
 
   if (user && user->is_in_room()) {
     const int room_id = user->get_room_id();
     auto it = state->rooms.find(room_id);
     if (it == state->rooms.end()) {
-      return;
+      return Protocol::ERROR | Protocol::ROOM_STATE_ERROR;
     }
     auto room = it->second;
-    if (!room->is_member(uid)) {
-      return;
+    if (!room->is_member(req.uid)) {
+      return Protocol::ERROR | Protocol::ROOM_STATE_ERROR;
     }
 
-    room->remove_member(uid);
+    room->remove_member(req.uid);
     user->set_room_id(-1);
     if (room->get_people_count() == 0) {
       state->rooms.erase(it);
     }
   }
+
+  state->users.erase(it);
+
+  return Protocol::SERVICE_SUCCESS;
 }
 
 std::shared_ptr<User> Server::get_user(const std::string &uid) const {
@@ -230,16 +232,6 @@ int Server::list_rooms(const Protocol::ListRoomsReq &,
   return Protocol::SERVICE_SUCCESS;
 }
 
-int Server::heartbeat(const Protocol::HeartbeatReq &req, Protocol::EmptyRsp &) {
-  std::lock_guard<std::mutex> lock(state->usersMutex);
-  auto it = state->users.find(req.uid);
-  if (it == state->users.end() || !it->second) {
-    return Protocol::SERVICE_FAIL | Protocol::NOT_FOUND;
-  }
-  it->second->touch_heartbeat();
-  return Protocol::SERVICE_SUCCESS;
-}
-
 Protocol::Envelope LoginServer::dispatch_request(const json &request) {
   logging::log("[dispatch][login] request={}", request.dump());
   const auto type = static_cast<Protocol::LoginRequestType>(request.value(
@@ -274,34 +266,4 @@ Protocol::Envelope HomeServer::dispatch_request(const json &request) {
   logging::log("[dispatch][home] type={} code={} message={}",
                static_cast<int>(type), env.code, env.message);
   return env;
-}
-
-asio::awaitable<void> Server::heartbeat_monitor() {
-  while (true) {
-    heartbeatTimer.expires_after(heartbeatInterval);
-    std::error_code ec;
-    co_await heartbeatTimer.async_wait(
-        asio::redirect_error(asio::use_awaitable, ec));
-    if (ec) {
-      continue;
-    }
-
-    std::vector<std::string> expired;
-    const auto now = std::chrono::steady_clock::now();
-    {
-      std::lock_guard<std::mutex> lock(state->usersMutex);
-      for (const auto &[uid, user] : state->users) {
-        if (!user) {
-          continue;
-        }
-        if (now - user->get_last_heartbeat() > heartbeatTimeout) {
-          expired.push_back(uid);
-        }
-      }
-    }
-
-    for (const auto &uid : expired) {
-      logout_user(uid);
-    }
-  }
 }

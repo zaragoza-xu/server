@@ -18,7 +18,12 @@ constexpr std::string_view HEADER = "CHAT";
 constexpr int HEADER_SIZE = 4;
 constexpr int MAX_MESSAGE_SIZE = 65536;
 
-enum class LoginRequestType { LOGIN = 0, REGISTER = 1, ERROR = 100 };
+enum class LoginRequestType {
+  LOGIN = 0,
+  REGISTER = 1,
+  LOGOUT = 2,
+  ERROR = 100
+};
 
 enum class HomeRequestType {
   CREATE_ROOM = 0,
@@ -26,7 +31,7 @@ enum class HomeRequestType {
   LEAVE_ROOM = 2,
   LIST_ROOMS = 3,
   SEND_MESSAGE = 4,
-  HEARTBEAT = 5,
+  //  HEARTBEAT = 5,
   EDIT_PROFILE = 6,
   ERROR = 100
 };
@@ -127,6 +132,13 @@ struct LoginReq {
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(LoginReq, type, uid)
 };
 
+struct LogoutReq {
+  Protocol::LoginRequestType type;
+  std::string uid;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(LogoutReq, type, uid)
+};
+
 struct EditProfileReq {
   Protocol::HomeRequestType type;
   PlayerData playerData;
@@ -168,13 +180,6 @@ struct SendMessageReq {
   std::string content;
 
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(SendMessageReq, type, content)
-};
-
-struct HeartbeatReq {
-  Protocol::HomeRequestType type;
-  std::string uid;
-
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(HeartbeatReq, type, uid);
 };
 
 struct EmptyRsp {};

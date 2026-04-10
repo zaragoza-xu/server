@@ -5,6 +5,10 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+if(NOT CMAKE_BUILD_TYPE)
+	set(CMAKE_BUILD_TYPE Release)
+endif()
+
 include(CTest)
 include(FetchContent)
 
@@ -16,6 +20,7 @@ file(GLOB SRC_LIST CONFIGURE_DEPENDS "src/*.cpp")
 find_package(Threads REQUIRED)
 
 find_package(asio CONFIG QUIET)
+
 if(NOT asio_FOUND)
 	if(NOT SERVER_FETCH_DEPS)
 		message(FATAL_ERROR "asio not found. Re-run with -DSERVER_FETCH_DEPS=ON or install asio.")
@@ -27,8 +32,9 @@ if(NOT asio_FOUND)
 		URL https://github.com/chriskohlhoff/asio/archive/refs/tags/asio-1-30-2.tar.gz
 	)
 	FetchContent_GetProperties(asio_src)
+
 	if(NOT asio_src_POPULATED)
-		FetchContent_Populate(asio_src)
+		FetchContent_MakeAvailable(asio_src)
 	endif()
 
 	add_library(asio INTERFACE)
@@ -38,6 +44,7 @@ if(NOT asio_FOUND)
 endif()
 
 find_package(nlohmann_json CONFIG QUIET)
+
 if(NOT nlohmann_json_FOUND)
 	if(NOT SERVER_FETCH_DEPS)
 		message(FATAL_ERROR "nlohmann_json not found. Re-run with -DSERVER_FETCH_DEPS=ON or install nlohmann_json.")
@@ -51,13 +58,13 @@ if(NOT nlohmann_json_FOUND)
 	FetchContent_MakeAvailable(nlohmann_json)
 endif()
 
-
 add_executable(server "${SRC_LIST}")
 target_include_directories(server PUBLIC "${PROJECT_SOURCE_DIR}/include" "${PROJECT_SOURCE_DIR}/third_party")
 target_link_libraries(server PRIVATE asio::asio nlohmann_json::nlohmann_json Threads::Threads)
 
 if(SERVER_BUILD_TESTS)
 	find_package(GTest CONFIG QUIET)
+
 	if(NOT GTest_FOUND)
 		if(NOT SERVER_FETCH_DEPS)
 			message(FATAL_ERROR "GTest not found. Re-run with -DSERVER_FETCH_DEPS=ON or install GTest.")
