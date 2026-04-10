@@ -1,0 +1,54 @@
+{
+  "name": "lobby_join_hot_room",
+  "description": "Short-connection hotspot room contention baseline.",
+  "target": {
+    "host": "127.0.0.1",
+    "port": 8766
+  },
+  "mode": "short_connection",
+  "duration_seconds": 180,
+  "concurrency": 100,
+  "heartbeat_interval_seconds": 5.0,
+  "prerequisites": {
+    "creator_uid_source": "registered_pool",
+    "create_room_first": true
+  },
+  "mix": [
+    {
+      "operation": "JOIN_ROOM",
+      "weight": 80,
+      "request_template": {
+        "type": 1,
+        "roomId_from_context": true,
+        "uid_from_pool": true
+      }
+    },
+    {
+      "operation": "LEAVE_ROOM",
+      "weight": 20,
+      "request_template": {
+        "type": 2,
+        "uid_from_pool": true
+      }
+    }
+  ],
+  "metrics": {
+    "latency_quantiles": [
+      0.5,
+      0.95,
+      0.99
+    ],
+    "track_connect_latency": true,
+    "track_error_codes": true
+  },
+  "thresholds": {
+    "max_unexpected_error_rate": 0.001,
+    "allowed_error_codes": [
+      258
+    ],
+    "max_state_violation_count": 0,
+    "max_p99_latency_ms": 300.0,
+    "max_connect_failures": 0
+  },
+  "threads": 4
+}

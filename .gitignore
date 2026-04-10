@@ -1,3 +1,4 @@
 .*/
 build/
 log.*
+tests/stress_tests/output
