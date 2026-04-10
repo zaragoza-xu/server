@@ -183,7 +183,7 @@ int Server::join_room(const Protocol::JoinRoomReq &req,
     return Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR;
   }
   user->set_room_id(room->get_id());
-  room->collect_members_info(rsp.playerInfos);
+  rsp.roomInfo = room->get_info();
   return Protocol::SERVICE_SUCCESS;
 }
 
@@ -225,9 +225,7 @@ int Server::list_rooms(const Protocol::ListRoomsReq &,
   rsp.roomInfos.clear();
   rsp.roomInfos.reserve(state->rooms.size());
   for (const auto &[id, room] : state->rooms) {
-    rsp.roomInfos.push_back({.roomId = id,
-                             .maximumPeople = room->get_maximum_people(),
-                             .peopleCount = room->get_people_count()});
+    rsp.roomInfos.push_back(room->get_info());
   }
   return Protocol::SERVICE_SUCCESS;
 }

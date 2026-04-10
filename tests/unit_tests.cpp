@@ -80,13 +80,19 @@ TEST(ProtocolTest, RequestResponseJsonRoundTrip) {
   Protocol::PlayerBasicInfo p1{"1001", "alice", 1};
   Protocol::PlayerBasicInfo p2{"1002", "bob", 2};
   Protocol::JoinRoomRsp rsp;
-  rsp.playerInfos = {p1, p2};
+  rsp.roomInfo = Protocol::RoomInfo{.roomId = 42,
+                                    .maximumPeople = 6,
+                                    .basicInfos = {{p1.uid, p1}, {p2.uid, p2}}};
   json rspJson = rsp;
 
   auto parsedRsp = rspJson.get<Protocol::JoinRoomRsp>();
-  ASSERT_EQ(parsedRsp.playerInfos.size(), 2);
-  EXPECT_EQ(parsedRsp.playerInfos[0].uid, "1001");
-  EXPECT_EQ(parsedRsp.playerInfos[1].name, "bob");
+  EXPECT_EQ(parsedRsp.roomInfo.roomId, 42);
+  EXPECT_EQ(parsedRsp.roomInfo.maximumPeople, 6U);
+  ASSERT_EQ(parsedRsp.roomInfo.basicInfos.size(), 2U);
+  ASSERT_TRUE(parsedRsp.roomInfo.basicInfos.contains("1001"));
+  ASSERT_TRUE(parsedRsp.roomInfo.basicInfos.contains("1002"));
+  EXPECT_EQ(parsedRsp.roomInfo.basicInfos.at("1001").uid, "1001");
+  EXPECT_EQ(parsedRsp.roomInfo.basicInfos.at("1002").name, "bob");
 
   Protocol::EditProfileReq editReq;
   editReq.type = Protocol::HomeRequestType::EDIT_PROFILE;
@@ -184,7 +190,11 @@ TEST_F(ServerChannelBehaviorTest, ServerRegisterLoginAndRoomLifecycle) {
                                 .uid = bobUid},
           joinRsp),
       Protocol::SERVICE_SUCCESS);
-  EXPECT_EQ(joinRsp.playerInfos.size(), 2U);
+  EXPECT_EQ(joinRsp.roomInfo.roomId, roomId);
+  EXPECT_EQ(joinRsp.roomInfo.maximumPeople, 2U);
+  EXPECT_EQ(joinRsp.roomInfo.basicInfos.size(), 2U);
+  EXPECT_TRUE(joinRsp.roomInfo.basicInfos.contains(aliceUid));
+  EXPECT_TRUE(joinRsp.roomInfo.basicInfos.contains(bobUid));
 
   Protocol::ListRoomsRsp listRsp;
   ASSERT_EQ(
@@ -198,7 +208,7 @@ TEST_F(ServerChannelBehaviorTest, ServerRegisterLoginAndRoomLifecycle) {
   for (const auto &r : rooms) {
     if (r.roomId == roomId) {
       found = true;
-      EXPECT_EQ(r.peopleCount, 2U);
+      EXPECT_EQ(r.basicInfos.size(), 2U);
       EXPECT_EQ(r.maximumPeople, 2U);
     }
   }
