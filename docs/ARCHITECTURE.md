@@ -18,7 +18,7 @@
 3. 启动两个服务实例：
    - `LoginServer(auth-port)`
    - `HomeServer(lobby-port)`
-4. `Server` 构造时启动 `accept_loop` 与 `heartbeat_monitor`
+4. `Server` 构造时启动 `accept_loop`
 5. 每个连接创建一个 `Channel`，按行分帧读取 JSON，并调用 `server->dispatch_request`
 
 ## 2. 模块职责
@@ -42,7 +42,6 @@
   - `join_room`
   - `leave_room`
   - `list_rooms`
-  - `heartbeat`
 - `LoginServer` 和 `HomeServer` 通过命令表覆盖 `dispatch_request`
 - 命令分发采用“普通函数指针 + 模板桥接”模式：
   - `DispatchFn = Envelope (*)(Server&, const json&)`
@@ -77,7 +76,7 @@
   - `LEAVE_ROOM=2`
   - `LIST_ROOMS=3`
   - `SEND_MESSAGE=4`（预留）
-  - `HEARTBEAT=5`
+  - `HEARTBEAT=5`（历史保留值，当前未实现）
   - `EDIT_PROFILE=6`（预留）
   - `ERROR=100`
 
@@ -108,7 +107,6 @@
 - `int join_room(const Protocol::JoinRoomReq&, Protocol::JoinRoomRsp&)`
 - `int leave_room(const Protocol::LeaveRoomReq&, Protocol::EmptyRsp&)`
 - `int list_rooms(const Protocol::ListRoomsReq&, Protocol::ListRoomsRsp&)`
-- `int heartbeat(const Protocol::HeartbeatReq&, Protocol::EmptyRsp&)`
 
 说明：当前 `Channel` 不再保留旧的 `on_*` typed handlers 路径，统一走 `dispatch_request`。
 
@@ -119,7 +117,6 @@
   - `roomsMutex`
   - `userInfosMutex`
 - `LoginServer` 与 `HomeServer` 共享同一个 `ServerState`
-- 心跳检查由 `heartbeat_monitor` 定时清理超时会话
 
 ## 6. 已实现与预留项
 
@@ -127,7 +124,6 @@
 
 - 登录/注册
 - 创建房间/加入房间/离开房间/列房间
-- 心跳保活
 
 预留未打通：
 

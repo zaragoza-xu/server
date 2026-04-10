@@ -1,7 +1,6 @@
 #pragma once
 
 #include <array>
-#include <chrono>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -36,13 +35,9 @@ private:
   int port;
   asio::ip::tcp::acceptor acceptor;
   asio::io_context &ioContext;
-  asio::steady_timer heartbeatTimer;
-  std::chrono::seconds heartbeatInterval{5};
-  std::chrono::seconds heartbeatTimeout{30};
   std::shared_ptr<ServerState> state;
 
   asio::awaitable<void> accept_loop();
-  asio::awaitable<void> heartbeat_monitor();
 
 public:
   Server(asio::io_context &context, int port,
@@ -75,7 +70,6 @@ public:
   int join_room(const Protocol::JoinRoomReq &, Protocol::JoinRoomRsp &rsp);
   int leave_room(const Protocol::LeaveRoomReq &, Protocol::EmptyRsp &);
   int list_rooms(const Protocol::ListRoomsReq &, Protocol::ListRoomsRsp &rsp);
-  int heartbeat(const Protocol::HeartbeatReq &, Protocol::EmptyRsp &);
 
   // Internal/user lifecycle helpers.
   void logout_user(const std::string &uid);
@@ -133,8 +127,5 @@ private:
       {Protocol::HomeRequestType::LEAVE_ROOM,
        &Server::dispatch_entry<Protocol::LeaveRoomReq, Protocol::EmptyRsp,
                                &Server::leave_room>},
-      {Protocol::HomeRequestType::HEARTBEAT,
-       &Server::dispatch_entry<Protocol::HeartbeatReq, Protocol::EmptyRsp,
-                               &Server::heartbeat>},
   }};
 };

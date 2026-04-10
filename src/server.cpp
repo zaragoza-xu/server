@@ -25,13 +25,12 @@ Server::Server(asio::io_context &context, int port,
                std::shared_ptr<ServerState> sharedState)
     : ioContext(context), port(port),
       acceptor(context, tcp::endpoint(tcp::v4(), port)),
-      heartbeatTimer(context), state(std::move(sharedState)) {
+      state(std::move(sharedState)) {
   if (!state) {
     state = std::make_shared<ServerState>();
   }
 
   asio::co_spawn(ioContext, accept_loop(), asio::detached);
-  asio::co_spawn(ioContext, heartbeat_monitor(), asio::detached);
 }
 
 Protocol::Envelope Server::dispatch_request(const json &) {
@@ -85,9 +84,7 @@ int Server::login_user(const Protocol::LoginReq &req, Protocol::LoginRsp &rsp) {
   }
   auto onlineIt = state->users.find(req.uid);
   if (onlineIt != state->users.end()) {
-    onlineIt->second->touch_heartbeat();
-    rsp.playerData.basicInfo = onlineIt->second->get_info();
-    return Protocol::SERVICE_SUCCESS;
+    return Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST;
   }
 
   auto user = std::make_shared<User>(infoIt->second);
@@ -230,16 +227,6 @@ int Server::list_rooms(const Protocol::ListRoomsReq &,
   return Protocol::SERVICE_SUCCESS;
 }
 
-int Server::heartbeat(const Protocol::HeartbeatReq &req, Protocol::EmptyRsp &) {
-  std::lock_guard<std::mutex> lock(state->usersMutex);
-  auto it = state->users.find(req.uid);
-  if (it == state->users.end() || !it->second) {
-    return Protocol::SERVICE_FAIL | Protocol::NOT_FOUND;
-  }
-  it->second->touch_heartbeat();
-  return Protocol::SERVICE_SUCCESS;
-}
-
 Protocol::Envelope LoginServer::dispatch_request(const json &request) {
   logging::log("[dispatch][login] request={}", request.dump());
   const auto type = static_cast<Protocol::LoginRequestType>(request.value(
@@ -274,34 +261,4 @@ Protocol::Envelope HomeServer::dispatch_request(const json &request) {
   logging::log("[dispatch][home] type={} code={} message={}",
                static_cast<int>(type), env.code, env.message);
   return env;
-}
-
-asio::awaitable<void> Server::heartbeat_monitor() {
-  while (true) {
-    heartbeatTimer.expires_after(heartbeatInterval);
-    std::error_code ec;
-    co_await heartbeatTimer.async_wait(
-        asio::redirect_error(asio::use_awaitable, ec));
-    if (ec) {
-      continue;
-    }
-
-    std::vector<std::string> expired;
-    const auto now = std::chrono::steady_clock::now();
-    {
-      std::lock_guard<std::mutex> lock(state->usersMutex);
-      for (const auto &[uid, user] : state->users) {
-        if (!user) {
-          continue;
-        }
-        if (now - user->get_last_heartbeat() > heartbeatTimeout) {
-          expired.push_back(uid);
-        }
-      }
-    }
-
-    for (const auto &uid : expired) {
-      logout_user(uid);
-    }
-  }
 }

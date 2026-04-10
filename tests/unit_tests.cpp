@@ -44,7 +44,6 @@ TEST(ProtocolTest, CommandTypeMapping) {
   EXPECT_EQ(static_cast<int>(HomeRequestType::LEAVE_ROOM), 2);
   EXPECT_EQ(static_cast<int>(HomeRequestType::LIST_ROOMS), 3);
   EXPECT_EQ(static_cast<int>(HomeRequestType::SEND_MESSAGE), 4);
-  EXPECT_EQ(static_cast<int>(HomeRequestType::HEARTBEAT), 5);
   EXPECT_EQ(static_cast<int>(HomeRequestType::EDIT_PROFILE), 6);
   EXPECT_EQ(static_cast<int>(HomeRequestType::ERROR), 100);
 }

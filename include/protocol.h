@@ -170,13 +170,6 @@ struct SendMessageReq {
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(SendMessageReq, type, content)
 };
 
-struct HeartbeatReq {
-  Protocol::HomeRequestType type;
-  std::string uid;
-
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(HeartbeatReq, type, uid);
-};
-
 struct EmptyRsp {};
 
 struct RegisterRsp {
