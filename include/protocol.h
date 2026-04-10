@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -61,6 +62,15 @@ struct PlayerData {
   PlayerBasicInfo basicInfo;
 
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(PlayerData, basicInfo)
+};
+
+struct RoomInfo {
+  int roomId;
+  size_t maximumPeople;
+  std::unordered_map<std::string, PlayerBasicInfo> basicInfos;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(RoomInfo, roomId, maximumPeople,
+                                              basicInfos)
 };
 
 struct Envelope {
@@ -188,25 +198,9 @@ struct CreateRoomRsp {
 };
 
 struct JoinRoomRsp {
-  std::vector<PlayerBasicInfo> playerInfos;
+  RoomInfo roomInfo;
 
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(JoinRoomRsp, playerInfos)
-};
-
-struct LeaveRoomRsp {
-  // PlayerBasicInfo info;
-  // int roomId = -1;
-
-  // NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(LeaveRoomRsp, info, roomId)
-};
-
-struct RoomInfo {
-  int roomId;
-  size_t maximumPeople;
-  size_t peopleCount;
-
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(RoomInfo, roomId, maximumPeople,
-                                              peopleCount)
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(JoinRoomRsp, roomInfo)
 };
 
 struct ListRoomsRsp {
