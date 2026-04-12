@@ -1,0 +1,68 @@
+{
+  "name": "e2e_short_conn",
+  "description": "Cross-port short-connection end-to-end baseline.",
+  "targets": {
+    "auth": {
+      "host": "127.0.0.1",
+      "port": 8765
+    },
+    "lobby": {
+      "host": "127.0.0.1",
+      "port": 8766
+    }
+  },
+  "mode": "short_connection",
+  "duration_seconds": 180,
+  "concurrency": 80,
+  "flow": [
+    {
+      "step": "REGISTER",
+      "port": "auth",
+      "request_template": {
+        "type": 1,
+        "uid": ""
+      }
+    },
+    {
+      "step": "LOGIN",
+      "port": "auth",
+      "request_template": {
+        "type": 0,
+        "uid_from_previous": true
+      }
+    },
+    {
+      "step": "CREATE_ROOM_OR_JOIN",
+      "port": "lobby",
+      "distribution": {
+        "CREATE_ROOM": 20,
+        "JOIN_ROOM": 80
+      }
+    },
+    {
+      "step": "LEAVE_ROOM",
+      "port": "lobby",
+      "request_template": {
+        "type": 2,
+        "uid_from_previous": true
+      }
+    }
+  ],
+  "metrics": {
+    "latency_quantiles": [
+      0.5,
+      0.95,
+      0.99
+    ],
+    "track_connect_latency": true,
+    "track_error_codes": true,
+    "track_step_success_rate": true
+  },
+  "thresholds": {
+    "max_unexpected_error_rate": 0.001,
+    "min_flow_success_rate": 0.98,
+    "max_p99_latency_ms": 300.0,
+    "max_connect_failures": 0
+  },
+  "threads": 4
+}
