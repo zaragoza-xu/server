@@ -85,7 +85,7 @@ python3 tests/stress_tests/run_stress.py \
   --config tests/stress_tests/configs/lobby_join_hot_room.json
 ```
 
-说明：该场景默认启用持续心跳（`heartbeat_interval_seconds`，默认 5 秒），用于维持会话在线并减少超时导致的 `NOT_FOUND` 错误。
+说明：该场景默认通过周期性发送 `LIST_ROOMS`（`type = 3`，间隔由 `keepalive_interval_seconds` 控制，默认 5 秒）维持会话在线，并减少超时导致的 `NOT_FOUND` 错误。
 
 ### 3) e2e_short_conn
 
@@ -138,7 +138,9 @@ bash tests/stress_tests/ci_quick.sh
 
 - `[成功率与错误]`
   - `success_rate(成功率)`：返回 `code == 1` 的请求占比。
-  - `error_codes(失败错误码分布)`：失败请求按错误码聚合后的计数，用于区分预期业务拒绝和异常错误。
+  - `error_codes(失败错误码分布)`：失败请求分布，按位输出错误码、错误数量和错误码含义。格式示例：`{code=66, count=12, meaning=FAIL|BAD_REQUEST; code=130, count=3, meaning=FAIL|NOT_FOUND}`。
+  - `expected_error_codes(预期错误码分布)`：预期失败请求分布（默认指携带 `FAIL` 位且不携带 `ERROR` 位），输出格式与 `error_codes` 相同。
+  - `unexpected_error_codes(非预期错误码分布)`：非预期失败请求分布（默认指携带 `ERROR` 位，或未知状态组合），输出格式与 `error_codes` 相同。
 
 - `[连接稳定性]`
   - `connect_failures(建连失败次数)`：TCP 建连失败总次数。
@@ -154,9 +156,8 @@ bash tests/stress_tests/ci_quick.sh
     - `expected(预期值)`：配置中的目标阈值。
     - `passed(是否通过)`：该阈值项是否通过。
   - 当前支持的阈值项说明：
-    - `max_unexpected_error_rate`：非预期错误率上限。非预期错误指错误码不在 `allowed_error_codes` 中的失败请求。
+    - `max_unexpected_error_rate`：非预期错误率上限。非预期错误指携带 `ERROR` 位（或未知状态组合）的失败请求。
     - `min_flow_success_rate`：流程成功率下限（适用于端到端流程类场景）。
     - `max_p99_latency_ms`：端到端 `p99` 延迟上限（毫秒）。
     - `max_connect_failures`：建连失败次数上限。
     - `max_state_violation_count`：场景一致性违规计数上限（例如 `state_violations`）。
-    - `allowed_error_codes`：允许视为“预期业务错误”的错误码白名单（用于 `max_unexpected_error_rate` 计算）。

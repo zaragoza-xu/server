@@ -17,8 +17,11 @@ class TcpShortClient:
         meta = {
             "connect_ok": False,
             "connect_latency_ms": 0.0,
+            "send_ok": False,
             "send_latency_ms": 0.0,
+            "ttfb_ok": False,
             "ttfb_latency_ms": 0.0,
+            "recv_ok": False,
             "recv_latency_ms": 0.0,
             "e2e_latency_ms": 0.0,
             "close_ok": False,
@@ -37,11 +40,14 @@ class TcpShortClient:
             writer.write(frame.encode("utf-8"))
             await asyncio.wait_for(writer.drain(), timeout=self.timeout_seconds)
             send_done = time.perf_counter()
+            meta["send_ok"] = True
             meta["send_latency_ms"] = (send_done - send_start) * 1000
 
             recv_start = time.perf_counter()
             line = await asyncio.wait_for(reader.readline(), timeout=self.timeout_seconds)
             recv_done = time.perf_counter()
+            meta["ttfb_ok"] = True
+            meta["recv_ok"] = True
             meta["ttfb_latency_ms"] = (recv_done - send_done) * 1000
             meta["recv_latency_ms"] = (recv_done - recv_start) * 1000
             meta["e2e_latency_ms"] = (recv_done - request_start) * 1000

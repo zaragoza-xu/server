@@ -5,10 +5,14 @@
     "host": "127.0.0.1",
     "port": 8766
   },
+  "auth_target": {
+    "host": "127.0.0.1",
+    "port": 8765
+  },
   "mode": "short_connection",
   "duration_seconds": 180,
   "concurrency": 100,
-  "heartbeat_interval_seconds": 5.0,
+  "keepalive_interval_seconds": 5.0,
   "prerequisites": {
     "creator_uid_source": "registered_pool",
     "create_room_first": true

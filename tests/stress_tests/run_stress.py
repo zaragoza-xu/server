@@ -113,6 +113,14 @@ async def main_async(config_path: Path, output_dir_override: str, threads_overri
     print(f"threads={len(chunks)} per_thread_concurrency={chunks}")
     print(f"threshold_passed={report['threshold_result']['passed']}")
     if not report["threshold_result"]["passed"]:
+        failed_checks = [c for c in report["threshold_result"].get("checks", []) if not c.get("passed", False)]
+        if failed_checks:
+            print("failed_threshold_checks:")
+            for check in failed_checks:
+                print(
+                    f"  - {check.get('name', 'unknown')}: "
+                    f"actual={check.get('actual')} expected={check.get('expected')}"
+                )
         sys.exit(2)
 
 

@@ -7,6 +7,22 @@ from pathlib import Path
 from typing import Dict, List
 
 
+CODE_BIT_FLAGS = [
+    (1, "SUCCESS"),
+    (2, "FAIL"),
+    (4, "ERROR"),
+    (8, "TIME_OUT"),
+    (16, "DESERIALIZE_FAIL"),
+    (32, "CONNECTION_ERROR"),
+    (64, "BAD_REQUEST"),
+    (128, "NOT_FOUND"),
+    (256, "ROOM_STATE_ERROR"),
+]
+
+FAIL_MASK = 1 << 1
+ERROR_MASK = 1 << 2
+
+
 def _quantile(sorted_values: List[float], q: float) -> float:
     if not sorted_values:
         return 0.0
@@ -16,6 +32,50 @@ def _quantile(sorted_values: List[float], q: float) -> float:
     if lo == hi:
         return sorted_values[lo]
     return sorted_values[lo] + (sorted_values[hi] - sorted_values[lo]) * (idx - lo)
+
+
+def _is_unexpected_error_code(code: int) -> bool:
+    # Policy: any code carrying ERROR bit is unexpected; FAIL-only codes are expected business failures.
+    return (code & ERROR_MASK) != 0
+
+
+def _decode_code_bits(code: int) -> List[str]:
+    labels: List[str] = []
+    for mask, name in CODE_BIT_FLAGS:
+        if (code & mask) != 0:
+            labels.append(name)
+    if labels:
+        return labels
+    return ["NONE"]
+
+
+def _format_error_distribution(error_codes: Dict[str, int]) -> str:
+    if not error_codes:
+        return "{}"
+    parts: List[str] = []
+    for code_str, count in sorted(error_codes.items(), key=lambda item: int(item[0])):
+        code_int = int(code_str)
+        meaning = "|".join(_decode_code_bits(code_int))
+        parts.append(f"code={code_int:b}, count={int(count)}, meaning={meaning}")
+    return "{" + "; ".join(parts) + "}"
+
+
+def _split_error_codes_by_expectation(error_codes: Dict[str, int]) -> Dict[str, Dict[str, int]]:
+    expected: Dict[str, int] = {}
+    unexpected: Dict[str, int] = {}
+    for code_str, count in error_codes.items():
+        code_int = int(code_str)
+        if _is_unexpected_error_code(code_int):
+            unexpected[code_str] = int(count)
+        elif (code_int & FAIL_MASK) != 0:
+            expected[code_str] = int(count)
+        else:
+            # Unknown status shape: treat conservatively as unexpected.
+            unexpected[code_str] = int(count)
+    return {
+        "expected": expected,
+        "unexpected": unexpected,
+    }
 
 
 @dataclass
@@ -42,6 +102,9 @@ class RunMetrics:
         self,
         response_code: int,
         connect_ok: bool,
+        send_ok: bool,
+        ttfb_ok: bool,
+        recv_ok: bool,
         close_ok: bool,
         connect_ms: float,
         send_ms: float,
@@ -51,18 +114,21 @@ class RunMetrics:
     ) -> None:
         self.total_requests += 1
         self.latency_e2e_ms.append(e2e_ms)
-        self.latency_connect_ms.append(connect_ms)
-        self.latency_send_ms.append(send_ms)
-        self.latency_ttfb_ms.append(ttfb_ms)
-        self.latency_recv_ms.append(recv_ms)
         self.connect_attempts += 1
-        self.close_attempts += 1
         if connect_ok:
+            self.latency_connect_ms.append(connect_ms)
             self.connect_latency_ms.append(connect_ms)
+            self.close_attempts += 1
+            if not close_ok:
+                self.close_failures += 1
         else:
             self.connect_failures += 1
-        if not close_ok:
-            self.close_failures += 1
+        if send_ok:
+            self.latency_send_ms.append(send_ms)
+        if ttfb_ok:
+            self.latency_ttfb_ms.append(ttfb_ms)
+        if recv_ok:
+            self.latency_recv_ms.append(recv_ms)
         if response_code == 1:
             self.success_requests += 1
         else:
@@ -97,7 +163,7 @@ class RunMetrics:
     def to_report(self, scenario_name: str) -> Dict:
         runtime_s = max(self.ended_at - self.started_at, 1e-9)
         e2e_sorted = sorted(self.latency_e2e_ms)
-        connect_sorted = sorted(self.latency_connect_ms)
+        connect_sorted = sorted(self.connect_latency_ms)
         send_sorted = sorted(self.latency_send_ms)
         ttfb_sorted = sorted(self.latency_ttfb_ms)
         recv_sorted = sorted(self.latency_recv_ms)
@@ -181,12 +247,9 @@ def evaluate_thresholds(report: Dict, thresholds: Dict) -> Dict:
     counters = report.get("custom_counters", {})
 
     if "max_unexpected_error_rate" in thresholds:
-        allowed_codes = {str(code) for code in thresholds.get("allowed_error_codes", [])}
+        split_codes = _split_error_codes_by_expectation(report.get("error_codes", {}))
         all_failures = int(req.get("failed", 0))
-        unexpected_failures = 0
-        for code, count in report.get("error_codes", {}).items():
-            if str(code) not in allowed_codes:
-                unexpected_failures += int(count)
+        unexpected_failures = sum(int(v) for v in split_codes["unexpected"].values())
         err_rate = (unexpected_failures / float(req["total"])) if req.get("total") else 0.0
         limit = float(thresholds["max_unexpected_error_rate"])
         checks.append(
@@ -197,13 +260,15 @@ def evaluate_thresholds(report: Dict, thresholds: Dict) -> Dict:
                     "unexpected_error_rate": err_rate,
                     "unexpected_failures": unexpected_failures,
                     "all_failures": all_failures,
-                    "allowed_error_codes": sorted(allowed_codes),
                 },
                 limit,
             )
         )
     if "min_flow_success_rate" in thresholds:
-        value = float(req["success_rate"])
+        flow_success = int(counters.get("flow_success", 0))
+        flow_failures = sum(int(v) for k, v in counters.items() if str(k).startswith("flow_fail_"))
+        flow_total = flow_success + flow_failures
+        value = (flow_success / float(flow_total)) if flow_total > 0 else 0.0
         limit = float(thresholds["min_flow_success_rate"])
         checks.append(("min_flow_success_rate", value >= limit, value, limit))
     if "max_p99_latency_ms" in thresholds:
@@ -244,6 +309,8 @@ def write_outputs(report: Dict, output_dir: Path) -> None:
     lat_breakdown = report.get("latency_breakdown_ms", {})
     conn = report["connection"]
     runner = report.get("runner", {})
+    error_codes = report.get("error_codes", {})
+    split_codes = _split_error_codes_by_expectation(error_codes)
     lines = [
         f"scenario: {report['scenario']}",
         f"runtime_seconds: {report['runtime_seconds']:.2f}",
@@ -268,7 +335,9 @@ def write_outputs(report: Dict, output_dir: Path) -> None:
         "",
         "[成功率与错误]",
         f"success_rate(成功率): {req['success_rate']:.4f}",
-        f"error_codes(失败错误码分布): {report['error_codes']}",
+        f"error_codes(失败错误码分布): {_format_error_distribution(error_codes)}",
+        f"expected_error_codes(预期错误码分布): {_format_error_distribution(split_codes['expected'])}",
+        f"unexpected_error_codes(非预期错误码分布): {_format_error_distribution(split_codes['unexpected'])}",
         "",
         "[连接稳定性]",
         f"connect_failures(建连失败次数): {conn['connect_failures']}",

@@ -27,6 +27,9 @@ async def _request_and_record(client: TcpShortClient, payload: Dict[str, Any], m
         metrics.add(
             response_code=-1,
             connect_ok=False,
+            send_ok=False,
+            ttfb_ok=False,
+            recv_ok=False,
             close_ok=False,
             connect_ms=0.0,
             send_ms=0.0,
@@ -39,6 +42,9 @@ async def _request_and_record(client: TcpShortClient, payload: Dict[str, Any], m
     metrics.add(
         response_code=int(resp.get("code", -1)),
         connect_ok=bool(meta.get("connect_ok", False)),
+        send_ok=bool(meta.get("send_ok", False)),
+        ttfb_ok=bool(meta.get("ttfb_ok", False)),
+        recv_ok=bool(meta.get("recv_ok", False)),
         close_ok=bool(meta.get("close_ok", False)),
         connect_ms=float(meta.get("connect_latency_ms", 0.0)),
         send_ms=float(meta.get("send_latency_ms", 0.0)),
@@ -78,9 +84,12 @@ async def auth_register_login(config: Dict[str, Any], metrics: RunMetrics) -> No
 async def lobby_join_hot_room(config: Dict[str, Any], metrics: RunMetrics) -> None:
     duration = int(config["duration_seconds"])
     concurrency = int(config["concurrency"])
-    heartbeat_interval_s = float(config.get("heartbeat_interval_seconds", 5.0))
+    keepalive_interval_s = float(
+        config.get("keepalive_interval_seconds", config.get("heartbeat_interval_seconds", 5.0))
+    )
     end_at = time.monotonic() + duration
-    auth = TcpShortClient("127.0.0.1", 8765)
+    auth_target = config.get("auth_target", {"host": "127.0.0.1", "port": 8765})
+    auth = TcpShortClient(auth_target["host"], int(auth_target["port"]))
     lobby = TcpShortClient(config["target"]["host"], int(config["target"]["port"]))
     ctx = ScenarioContext()
 
@@ -112,17 +121,16 @@ async def lobby_join_hot_room(config: Dict[str, Any], metrics: RunMetrics) -> No
             else:
                 await _request_and_record(lobby, {"type": 2, "uid": uid}, metrics)
 
-    async def heartbeat_worker() -> None:
-        # Keep user sessions alive to avoid heartbeat-timeout driven NOT_FOUND storms.
+    async def keepalive_worker() -> None:
+        # Keep sessions active via LIST_ROOMS polling to reduce timeout-driven NOT_FOUND storms.
         while time.monotonic() < end_at:
-            sleep_s = max(0.2, heartbeat_interval_s)
+            sleep_s = max(0.2, keepalive_interval_s)
             await asyncio.sleep(sleep_s)
-            for uid in ctx.uid_pool:
-                await _request_and_record(lobby, {"type": 5, "uid": uid}, metrics)
+            await _request_and_record(lobby, {"type": 3}, metrics)
 
     await asyncio.gather(
         *[worker() for _ in range(concurrency)],
-        heartbeat_worker(),
+        keepalive_worker(),
     )
 
 
@@ -148,6 +156,7 @@ async def e2e_short_conn(config: Dict[str, Any], metrics: RunMetrics) -> None:
                 metrics.count("flow_fail_login")
                 continue
 
+            entered_room = False
             if random.random() < 0.2:
                 create = await _request_and_record(
                     lobby, {"type": 0, "uid": uid, "maximumPeople": 16}, metrics
@@ -156,6 +165,7 @@ async def e2e_short_conn(config: Dict[str, Any], metrics: RunMetrics) -> None:
                 if room_id > 0:
                     async with ctx.lock:
                         ctx.room_id = room_id
+                    entered_room = True
                 else:
                     metrics.count("flow_fail_create_or_join")
             else:
@@ -165,8 +175,15 @@ async def e2e_short_conn(config: Dict[str, Any], metrics: RunMetrics) -> None:
                     join = await _request_and_record(
                         lobby, {"type": 1, "roomId": room_id, "uid": uid}, metrics
                     )
-                    if int(join.get("code", -1)) != SUCCESS_CODE:
+                    if int(join.get("code", -1)) == SUCCESS_CODE:
+                        entered_room = True
+                    else:
                         metrics.count("flow_fail_create_or_join")
+                else:
+                    metrics.count("flow_fail_create_or_join")
+
+            if not entered_room:
+                continue
 
             leave = await _request_and_record(lobby, {"type": 2, "uid": uid}, metrics)
             if int(leave.get("code", -1)) == SUCCESS_CODE:

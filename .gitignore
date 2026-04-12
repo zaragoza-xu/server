@@ -3,3 +3,5 @@ build/
 log.*
 .*
 tests/stress_tests/output
+tests/stress_tests/**/__pycache__/
+tests/stress_tests/**/*.pyc
