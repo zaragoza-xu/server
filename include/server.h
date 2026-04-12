@@ -65,6 +65,7 @@ public:
   // Service APIs: do validation and state transitions atomically.
   int register_user(const Protocol::RegisterReq &, Protocol::RegisterRsp &);
   int login_user(const Protocol::LoginReq &, Protocol::LoginRsp &);
+  int edit_profile(const Protocol::EditProfileReq &, Protocol::EmptyRsp &);
   int create_room(const Protocol::CreateRoomReq &, Protocol::CreateRoomRsp &);
   int join_room(const Protocol::JoinRoomReq &, Protocol::JoinRoomRsp &);
   int leave_room(const Protocol::LeaveRoomReq &, Protocol::EmptyRsp &);
@@ -117,6 +118,9 @@ private:
     DispatchFn dispatch;
   };
   const std::array<HomeServer::CommandDescriptor, 5> COMMAND_TABLE{{
+      {Protocol::HomeRequestType::EDIT_PROFILE,
+       &Server::dispatch_entry<Protocol::EditProfileReq, Protocol::EmptyRsp,
+                               &Server::edit_profile>},
       {Protocol::HomeRequestType::CREATE_ROOM,
        &Server::dispatch_entry<Protocol::CreateRoomReq, Protocol::CreateRoomRsp,
                                &Server::create_room>},

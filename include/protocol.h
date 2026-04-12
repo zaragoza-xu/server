@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -72,7 +71,7 @@ struct PlayerData {
 struct RoomInfo {
   int roomId;
   size_t maximumPeople;
-  std::unordered_map<std::string, PlayerBasicInfo> basicInfos;
+  std::vector<PlayerBasicInfo> basicInfos;
 
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(RoomInfo, roomId, maximumPeople,
                                               basicInfos)
@@ -141,9 +140,11 @@ struct LogoutReq {
 
 struct EditProfileReq {
   Protocol::HomeRequestType type;
-  PlayerData playerData;
+  std::string uid;
+  PlayerBasicInfo basicInfo;
 
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(EditProfileReq, type, playerData);
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(EditProfileReq, type, uid,
+                                              basicInfo);
 };
 
 struct CreateRoomReq {

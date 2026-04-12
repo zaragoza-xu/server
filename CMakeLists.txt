@@ -63,6 +63,9 @@ target_include_directories(server PUBLIC "${PROJECT_SOURCE_DIR}/include" "${PROJ
 target_link_libraries(server PRIVATE asio::asio nlohmann_json::nlohmann_json Threads::Threads)
 
 if(SERVER_BUILD_TESTS)
+	set(TEST_SRC_LIST ${SRC_LIST})
+	list(FILTER TEST_SRC_LIST EXCLUDE REGEX "src/main\\.cpp$")
+
 	find_package(GTest CONFIG QUIET)
 
 	if(NOT GTest_FOUND)
@@ -81,9 +84,7 @@ if(SERVER_BUILD_TESTS)
 
 	add_executable(unit_tests
 		tests/unit_tests.cpp
-		src/room.cpp
-		src/server.cpp
-		src/channel.cpp
+		"${TEST_SRC_LIST}"
 	)
 	target_include_directories(unit_tests PUBLIC "${PROJECT_SOURCE_DIR}/include")
 	target_link_libraries(unit_tests PRIVATE
