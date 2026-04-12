@@ -1,23 +1,20 @@
 #pragma once
 
+#include <memory>
 #include <string>
 
-#include "protocol.h"
-
-class Channel;
+struct ServerState;
 class User {
 private:
-  Protocol::PlayerBasicInfo info;
+  std::shared_ptr<ServerState> state;
+  std::string uid;
   int roomId;
 
 public:
-  User(const Protocol::PlayerBasicInfo &info) : info(info), roomId(-1) {}
+  User(std::string uid, std::shared_ptr<ServerState> state)
+      : state(std::move(state)), uid(std::move(uid)), roomId(-1) {}
 
-  const Protocol::PlayerBasicInfo &get_info() const { return info; }
-
-  const std::string &get_username() const { return info.name; }
-  int get_color() const { return info.color; }
-  const std::string &get_uid() const { return info.uid; }
+  const std::string &get_uid() const { return uid; }
 
   int get_room_id() const { return roomId; }
   void set_room_id(int roomId) { this->roomId = roomId; }

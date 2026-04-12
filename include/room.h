@@ -1,40 +1,44 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <memory>
 #include <mutex>
 #include <string>
-#include <unordered_map>
+#include <vector>
 
 #include "protocol.h"
 
 class User;
+struct ServerState;
 
 class Room {
 private:
+  std::shared_ptr<ServerState> state;
   int roomId;
   size_t maximumPeople;
-  std::unordered_map<std::string, Protocol::PlayerBasicInfo> basicInfos;
+  std::vector<std::string> uids;
   mutable std::mutex roomMutex;
 
 public:
-  Room(int roomId, size_t maximumPeople, std::shared_ptr<User> creator);
+  Room(int roomId, size_t maximumPeople, std::shared_ptr<ServerState> state,
+       std::shared_ptr<User> creator);
 
   int get_id() const { return roomId; }
 
-  Protocol::RoomInfo get_info() const {
-    std::lock_guard<std::mutex> lock(roomMutex);
-    return Protocol::RoomInfo{.roomId = roomId,
-                              .maximumPeople = maximumPeople,
-                              .basicInfos = basicInfos};
-  }
+  Protocol::RoomInfo get_info() const;
 
   // Add member if not present and capacity allows.
   bool add_member(std::shared_ptr<User> user);
 
   bool remove_member(const std::string &uid) {
     std::lock_guard<std::mutex> lock(roomMutex);
-    return basicInfos.erase(uid) > 0;
+    auto it = std::find(uids.begin(), uids.end(), uid);
+    if (it == uids.end()) {
+      return false;
+    }
+    uids.erase(it);
+    return true;
   }
 
   size_t get_maximum_people() const {
@@ -44,11 +48,11 @@ public:
 
   bool is_member(const std::string &uid) const {
     std::lock_guard<std::mutex> lock(roomMutex);
-    return basicInfos.count(uid) > 0;
+    return std::find(uids.begin(), uids.end(), uid) != uids.end();
   }
 
   size_t get_people_count() const {
     std::lock_guard<std::mutex> lock(roomMutex);
-    return basicInfos.size();
+    return uids.size();
   }
 };

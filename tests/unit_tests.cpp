@@ -1,6 +1,8 @@
 #include <memory>
 #include <string>
 
+#include <algorithm>
+
 #include <gtest/gtest.h>
 
 #include <asio/io_context.hpp>
@@ -80,39 +82,50 @@ TEST(ProtocolTest, RequestResponseJsonRoundTrip) {
   Protocol::PlayerBasicInfo p1{"1001", "alice", 1};
   Protocol::PlayerBasicInfo p2{"1002", "bob", 2};
   Protocol::JoinRoomRsp rsp;
-  rsp.roomInfo = Protocol::RoomInfo{.roomId = 42,
-                                    .maximumPeople = 6,
-                                    .basicInfos = {{p1.uid, p1}, {p2.uid, p2}}};
+  rsp.roomInfo = Protocol::RoomInfo{
+      .roomId = 42, .maximumPeople = 6, .basicInfos = {p1, p2}};
   json rspJson = rsp;
 
   auto parsedRsp = rspJson.get<Protocol::JoinRoomRsp>();
   EXPECT_EQ(parsedRsp.roomInfo.roomId, 42);
   EXPECT_EQ(parsedRsp.roomInfo.maximumPeople, 6U);
   ASSERT_EQ(parsedRsp.roomInfo.basicInfos.size(), 2U);
-  ASSERT_TRUE(parsedRsp.roomInfo.basicInfos.contains("1001"));
-  ASSERT_TRUE(parsedRsp.roomInfo.basicInfos.contains("1002"));
-  EXPECT_EQ(parsedRsp.roomInfo.basicInfos.at("1001").uid, "1001");
-  EXPECT_EQ(parsedRsp.roomInfo.basicInfos.at("1002").name, "bob");
+  auto by_uid = [](const std::vector<Protocol::PlayerBasicInfo> &infos,
+                   const std::string &uid) {
+    return std::find_if(infos.begin(), infos.end(),
+                        [&uid](const Protocol::PlayerBasicInfo &info) {
+                          return info.uid == uid;
+                        });
+  };
+  auto it1001 = by_uid(parsedRsp.roomInfo.basicInfos, "1001");
+  auto it1002 = by_uid(parsedRsp.roomInfo.basicInfos, "1002");
+  ASSERT_NE(it1001, parsedRsp.roomInfo.basicInfos.end());
+  ASSERT_NE(it1002, parsedRsp.roomInfo.basicInfos.end());
+  EXPECT_EQ(it1001->uid, "1001");
+  EXPECT_EQ(it1002->name, "bob");
 
   Protocol::EditProfileReq editReq;
   editReq.type = Protocol::HomeRequestType::EDIT_PROFILE;
-  editReq.playerData.basicInfo = Protocol::PlayerBasicInfo{"1001", "alice", 7};
+  editReq.basicInfo = Protocol::PlayerBasicInfo{"1001", "alice", 7};
 
   json editJson = editReq;
-  EXPECT_EQ(editJson.at("playerData").at("basicInfo").at("uid"), "1001");
-  EXPECT_EQ(editJson.at("playerData").at("basicInfo").at("name"), "alice");
-  EXPECT_EQ(editJson.at("playerData").at("basicInfo").at("color"), 7);
+  EXPECT_EQ(editJson.at("basicInfo").at("uid"), "1001");
+  EXPECT_EQ(editJson.at("basicInfo").at("name"), "alice");
+  EXPECT_EQ(editJson.at("basicInfo").at("color"), 7);
 
   auto parsedEdit = editJson.get<Protocol::EditProfileReq>();
-  EXPECT_EQ(parsedEdit.playerData.basicInfo.uid, "1001");
-  EXPECT_EQ(parsedEdit.playerData.basicInfo.name, "alice");
-  EXPECT_EQ(parsedEdit.playerData.basicInfo.color, 7);
+  EXPECT_EQ(parsedEdit.basicInfo.uid, "1001");
+  EXPECT_EQ(parsedEdit.basicInfo.name, "alice");
+  EXPECT_EQ(parsedEdit.basicInfo.color, 7);
 }
 
 TEST(RoomTest, BasicBehavior) {
+  auto state = std::make_shared<ServerState>();
+
   Protocol::PlayerBasicInfo creatorInfo{"1", "creator", 1};
-  auto creator = std::make_shared<User>(creatorInfo);
-  Room room(10, 2, creator);
+  state->userInfos.emplace(creatorInfo.uid, creatorInfo);
+  auto creator = std::make_shared<User>(creatorInfo.uid, state);
+  Room room(10, 2, state, creator);
 
   EXPECT_EQ(room.get_id(), 10);
   EXPECT_EQ(room.get_maximum_people(), 2);
@@ -121,8 +134,10 @@ TEST(RoomTest, BasicBehavior) {
 
   Protocol::PlayerBasicInfo info2{"2", "u2", 2};
   Protocol::PlayerBasicInfo info3{"3", "u3", 3};
-  auto user2 = std::make_shared<User>(info2);
-  auto user3 = std::make_shared<User>(info3);
+  state->userInfos.emplace(info2.uid, info2);
+  state->userInfos.emplace(info3.uid, info3);
+  auto user2 = std::make_shared<User>(info2.uid, state);
+  auto user3 = std::make_shared<User>(info3.uid, state);
 
   EXPECT_TRUE(room.add_member(user2));
   EXPECT_EQ(room.get_people_count(), 2);
@@ -138,6 +153,146 @@ TEST(RoomTest, BasicBehavior) {
 
   // Removing non-existent member should return false.
   EXPECT_FALSE(room.remove_member("404"));
+}
+
+TEST(RoomTest, GetInfoSkipsMissingProfiles) {
+  auto state = std::make_shared<ServerState>();
+
+  Protocol::PlayerBasicInfo creatorInfo{"10", "creator", 1};
+  Protocol::PlayerBasicInfo info2{"20", "u2", 2};
+  state->userInfos.emplace(creatorInfo.uid, creatorInfo);
+  state->userInfos.emplace(info2.uid, info2);
+
+  auto creator = std::make_shared<User>(creatorInfo.uid, state);
+  auto user2 = std::make_shared<User>(info2.uid, state);
+  Room room(99, 2, state, creator);
+  ASSERT_TRUE(room.add_member(user2));
+
+  state->userInfos.erase(info2.uid);
+
+  const auto roomInfo = room.get_info();
+  ASSERT_EQ(roomInfo.basicInfos.size(), 1U);
+  EXPECT_EQ(roomInfo.basicInfos.front().uid, creatorInfo.uid);
+}
+
+TEST(ServerBehaviorTest, ErrorPathsCoverage) {
+  asio::io_context ioContext;
+  auto state = std::make_shared<ServerState>();
+  auto server = std::make_shared<Server>(ioContext, 0, state);
+
+  Protocol::LoginRsp loginRsp;
+  EXPECT_EQ(server->login_user(
+                Protocol::LoginReq{.type = Protocol::LoginRequestType::LOGIN,
+                                   .uid = ""},
+                loginRsp),
+            (Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST));
+  EXPECT_EQ(server->login_user(
+                Protocol::LoginReq{.type = Protocol::LoginRequestType::LOGIN,
+                                   .uid = "404"},
+                loginRsp),
+            (Protocol::SERVICE_FAIL | Protocol::NOT_FOUND));
+
+  Protocol::CreateRoomRsp createRsp;
+  EXPECT_EQ(server->create_room(
+                Protocol::CreateRoomReq{
+                    .type = Protocol::HomeRequestType::CREATE_ROOM,
+                    .uid = "404",
+                    .maximumPeople = 1,
+                },
+                createRsp),
+            (Protocol::SERVICE_FAIL | Protocol::NOT_FOUND));
+
+  Protocol::EmptyRsp emptyRsp;
+  EXPECT_EQ(server->leave_room(
+                Protocol::LeaveRoomReq{.type = Protocol::HomeRequestType::LEAVE_ROOM,
+                                       .uid = "404"},
+                emptyRsp),
+            (Protocol::SERVICE_FAIL | Protocol::NOT_FOUND));
+  EXPECT_EQ(server->logout_user(
+                Protocol::LogoutReq{.type = Protocol::LoginRequestType::LOGOUT,
+                                    .uid = ""},
+                emptyRsp),
+            (Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST));
+  EXPECT_EQ(server->logout_user(
+                Protocol::LogoutReq{.type = Protocol::LoginRequestType::LOGOUT,
+                                    .uid = "404"},
+                emptyRsp),
+            (Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST));
+
+  Protocol::RegisterRsp reg1;
+  ASSERT_EQ(server->register_user(
+                Protocol::RegisterReq{.type = Protocol::LoginRequestType::REGISTER},
+                reg1),
+            Protocol::SERVICE_SUCCESS);
+  const auto uid1 = reg1.uid;
+  ASSERT_EQ(server->login_user(
+                Protocol::LoginReq{.type = Protocol::LoginRequestType::LOGIN,
+                                   .uid = uid1},
+                loginRsp),
+            Protocol::SERVICE_SUCCESS);
+
+  EXPECT_EQ(server->leave_room(
+                Protocol::LeaveRoomReq{.type = Protocol::HomeRequestType::LEAVE_ROOM,
+                                       .uid = uid1},
+                emptyRsp),
+            (Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR));
+
+  ASSERT_EQ(server->create_room(
+                Protocol::CreateRoomReq{
+                    .type = Protocol::HomeRequestType::CREATE_ROOM,
+                    .uid = uid1,
+                    .maximumPeople = 1,
+                },
+                createRsp),
+            Protocol::SERVICE_SUCCESS);
+
+  EXPECT_EQ(server->create_room(
+                Protocol::CreateRoomReq{
+                    .type = Protocol::HomeRequestType::CREATE_ROOM,
+                    .uid = uid1,
+                    .maximumPeople = 1,
+                },
+                createRsp),
+            (Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR));
+
+  Protocol::JoinRoomRsp joinRsp;
+  EXPECT_EQ(server->join_room(
+                Protocol::JoinRoomReq{.type = Protocol::HomeRequestType::JOIN_ROOM,
+                                      .roomId = createRsp.roomId,
+                                      .uid = uid1},
+                joinRsp),
+            (Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR));
+
+  Protocol::RegisterRsp reg2;
+  ASSERT_EQ(server->register_user(
+                Protocol::RegisterReq{.type = Protocol::LoginRequestType::REGISTER},
+                reg2),
+            Protocol::SERVICE_SUCCESS);
+  const auto uid2 = reg2.uid;
+  ASSERT_EQ(server->login_user(
+                Protocol::LoginReq{.type = Protocol::LoginRequestType::LOGIN,
+                                   .uid = uid2},
+                loginRsp),
+            Protocol::SERVICE_SUCCESS);
+
+  EXPECT_EQ(server->join_room(
+                Protocol::JoinRoomReq{.type = Protocol::HomeRequestType::JOIN_ROOM,
+                                      .roomId = createRsp.roomId,
+                                      .uid = uid2},
+                joinRsp),
+            (Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR));
+
+  Protocol::EditProfileReq editReq{
+      .type = Protocol::HomeRequestType::EDIT_PROFILE,
+      .uid = uid2,
+      .basicInfo = Protocol::PlayerBasicInfo{uid2, "updated", 6}};
+  state->userInfos.erase(uid2);
+  EXPECT_EQ(server->edit_profile(editReq, emptyRsp),
+            (Protocol::SERVICE_FAIL | Protocol::NOT_FOUND));
+
+  editReq.uid = "nobody";
+  EXPECT_EQ(server->edit_profile(editReq, emptyRsp),
+            (Protocol::SERVICE_FAIL | Protocol::NOT_FOUND));
 }
 
 TEST_F(ServerChannelBehaviorTest, ServerRegisterLoginAndRoomLifecycle) {
@@ -209,8 +364,15 @@ TEST_F(ServerChannelBehaviorTest, ServerRegisterLoginAndRoomLifecycle) {
   EXPECT_EQ(joinRsp.roomInfo.roomId, roomId);
   EXPECT_EQ(joinRsp.roomInfo.maximumPeople, 2U);
   EXPECT_EQ(joinRsp.roomInfo.basicInfos.size(), 2U);
-  EXPECT_TRUE(joinRsp.roomInfo.basicInfos.contains(aliceUid));
-  EXPECT_TRUE(joinRsp.roomInfo.basicInfos.contains(bobUid));
+  auto has_uid = [](const std::vector<Protocol::PlayerBasicInfo> &infos,
+                    const std::string &uid) {
+    return std::any_of(infos.begin(), infos.end(),
+                       [&uid](const Protocol::PlayerBasicInfo &info) {
+                         return info.uid == uid;
+                       });
+  };
+  EXPECT_TRUE(has_uid(joinRsp.roomInfo.basicInfos, aliceUid));
+  EXPECT_TRUE(has_uid(joinRsp.roomInfo.basicInfos, bobUid));
 
   Protocol::ListRoomsRsp listRsp;
   ASSERT_EQ(

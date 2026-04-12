@@ -85,9 +85,9 @@ int Server::login_user(const Protocol::LoginReq &req, Protocol::LoginRsp &rsp) {
     return Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST;
   }
 
-  auto user = std::make_shared<User>(infoIt->second);
+  auto user = std::make_shared<User>(req.uid, state);
   state->users.emplace(req.uid, user);
-  rsp.playerData.basicInfo = user->get_info();
+  rsp.playerData.basicInfo = infoIt->second;
   return Protocol::SERVICE_SUCCESS;
 }
 
@@ -141,6 +141,21 @@ bool Server::user_exists(const std::string &uid) const {
   return state->userInfos.count(uid) > 0;
 }
 
+int Server::edit_profile(const Protocol::EditProfileReq &req,
+                         Protocol::EmptyRsp &) {
+  std::scoped_lock lock(state->usersMutex, state->userInfosMutex);
+  auto userIt = state->users.find(req.uid);
+  if (userIt == state->users.end() || !userIt->second) {
+    return Protocol::SERVICE_FAIL | Protocol::NOT_FOUND;
+  }
+  auto infoIt = state->userInfos.find(req.uid);
+  if (infoIt == state->userInfos.end()) {
+    return Protocol::SERVICE_FAIL | Protocol::NOT_FOUND;
+  }
+  infoIt->second = req.basicInfo;
+  return Protocol::SERVICE_SUCCESS;
+}
+
 int Server::create_room(const Protocol::CreateRoomReq &req,
                         Protocol::CreateRoomRsp &rsp) {
   std::scoped_lock lock(state->usersMutex, state->roomsMutex);
@@ -154,7 +169,7 @@ int Server::create_room(const Protocol::CreateRoomReq &req,
   }
 
   int room_id = state->nextRoomId++;
-  auto room = std::make_shared<Room>(room_id, req.maximumPeople, user);
+  auto room = std::make_shared<Room>(room_id, req.maximumPeople, state, user);
   state->rooms.emplace(room_id, room);
   user->set_room_id(room_id);
   rsp.roomId = room_id;
