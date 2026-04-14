@@ -6,7 +6,7 @@
 struct ServerState;
 class User {
 private:
-  std::shared_ptr<ServerState> state;
+  std::weak_ptr<ServerState> state;
   std::string uid;
   int roomId;
 

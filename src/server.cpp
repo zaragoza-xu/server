@@ -33,10 +33,82 @@ Server::Server(asio::io_context &context, int port,
   asio::co_spawn(ioContext, accept_loop(), asio::detached);
 }
 
-Protocol::Envelope Server::dispatch_request(const json &) {
+json Server::dispatch_request(const json &, const std::shared_ptr<Channel> &) {
   logging::log("[dispatch][base] reached fallback dispatcher");
-  return Protocol::Envelope::make_env(Protocol::SERVICE_FAIL |
-                                      Protocol::BAD_REQUEST);
+  return json(Protocol::ShortEnvelope::make_env(Protocol::SERVICE_FAIL |
+                                                Protocol::BAD_REQUEST));
+}
+
+int Server::resolve_room_member_locked(const std::string &uid,
+                                       std::shared_ptr<User> &member,
+                                       std::shared_ptr<Room> &room) const {
+  auto userIt = state->users.find(uid);
+  if (userIt == state->users.end() || !userIt->second) {
+    return Protocol::SERVICE_FAIL | Protocol::NOT_FOUND;
+  }
+
+  member = userIt->second;
+  if (!member->is_in_room()) {
+    return Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR;
+  }
+
+  const int room_id = member->get_room_id();
+  auto roomIt = state->rooms.find(room_id);
+  if (roomIt == state->rooms.end()) {
+    return Protocol::SERVICE_FAIL | Protocol::NOT_FOUND;
+  }
+
+  room = roomIt->second;
+  if (!room->is_member(uid)) {
+    return Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR;
+  }
+
+  return Protocol::SERVICE_SUCCESS;
+}
+
+void Server::bind_user_channel(const std::string &uid,
+                               const std::shared_ptr<Channel> &channel) {
+  if (uid.empty() || !channel) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(state->userChannelsMutex);
+  state->userChannels[uid] = channel;
+}
+
+void Server::broadcast_to_members(const std::vector<std::string> &memberUids,
+                                  const Protocol::LongEnvelope &message,
+                                  const std::string &excludeUid) {
+  const std::string payload = json(message).dump();
+  std::vector<std::shared_ptr<Channel>> targets;
+
+  {
+    std::lock_guard<std::mutex> lock(state->userChannelsMutex);
+    targets.reserve(memberUids.size());
+    for (const auto &uid : memberUids) {
+      if (!excludeUid.empty() && uid == excludeUid) {
+        continue;
+      }
+      auto it = state->userChannels.find(uid);
+      if (it == state->userChannels.end()) {
+        continue;
+      }
+      auto channel = it->second.lock();
+      if (!channel) {
+        state->userChannels.erase(it);
+        continue;
+      }
+      targets.push_back(std::move(channel));
+    }
+  }
+
+  for (auto &channel : targets) {
+    asio::co_spawn(
+        ioContext,
+        [channel, payload]() -> asio::awaitable<void> {
+          co_await channel->send_message(payload);
+        },
+        asio::detached);
+  }
 }
 
 asio::awaitable<void> Server::accept_loop() {
@@ -60,24 +132,24 @@ asio::awaitable<void> Server::accept_loop() {
 
 int Server::register_user(const Protocol::RegisterReq &req,
                           Protocol::RegisterRsp &rsp) {
-  std::scoped_lock lock(state->usersMutex, state->userInfosMutex);
+  std::scoped_lock lock(state->usersMutex, state->userDataMutex);
 
   Protocol::PlayerBasicInfo storedInfo = {"", "", 0};
   storedInfo.uid = std::to_string(state->nextUid++);
-  state->userInfos.emplace(storedInfo.uid, storedInfo);
+  state->userData.emplace(storedInfo.uid, (Protocol::PlayerData){storedInfo});
 
   rsp.uid = storedInfo.uid;
   return Protocol::SERVICE_SUCCESS;
 }
 
 int Server::login_user(const Protocol::LoginReq &req, Protocol::LoginRsp &rsp) {
-  std::scoped_lock lock(state->usersMutex, state->userInfosMutex);
+  std::scoped_lock lock(state->usersMutex, state->userDataMutex);
 
   if (req.uid == "") {
     return Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST;
   }
-  auto infoIt = state->userInfos.find(req.uid);
-  if (infoIt == state->userInfos.end()) {
+  auto infoIt = state->userData.find(req.uid);
+  if (infoIt == state->userData.end()) {
     return Protocol::SERVICE_FAIL | Protocol::NOT_FOUND;
   }
   auto onlineIt = state->users.find(req.uid);
@@ -87,7 +159,7 @@ int Server::login_user(const Protocol::LoginReq &req, Protocol::LoginRsp &rsp) {
 
   auto user = std::make_shared<User>(req.uid, state);
   state->users.emplace(req.uid, user);
-  rsp.playerData.basicInfo = infoIt->second;
+  rsp.playerData.basicInfo = infoIt->second.basicInfo;
   return Protocol::SERVICE_SUCCESS;
 }
 
@@ -96,29 +168,25 @@ int Server::logout_user(const Protocol::LogoutReq &req, Protocol::EmptyRsp &) {
     return Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST;
   }
 
-  std::shared_ptr<User> user;
   std::scoped_lock lock(state->usersMutex, state->roomsMutex);
   auto it = state->users.find(req.uid);
   if (it == state->users.end()) {
     return Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST;
   }
-  user = it->second;
+  auto user = it->second;
 
   if (user && user->is_in_room()) {
-    const int room_id = user->get_room_id();
-    auto it = state->rooms.find(room_id);
-    if (it == state->rooms.end()) {
-      return Protocol::ERROR | Protocol::ROOM_STATE_ERROR;
-    }
-    auto room = it->second;
-    if (!room->is_member(req.uid)) {
+    std::shared_ptr<User> member;
+    std::shared_ptr<Room> room;
+    const int resolve_code = resolve_room_member_locked(req.uid, member, room);
+    if (resolve_code != Protocol::SERVICE_SUCCESS) {
       return Protocol::ERROR | Protocol::ROOM_STATE_ERROR;
     }
 
     room->remove_member(req.uid);
-    user->set_room_id(-1);
+    member->set_room_id(-1);
     if (room->get_people_count() == 0) {
-      state->rooms.erase(it);
+      state->rooms.erase(room->get_id());
     }
   }
 
@@ -137,22 +205,22 @@ std::shared_ptr<User> Server::get_user(const std::string &uid) const {
 }
 
 bool Server::user_exists(const std::string &uid) const {
-  std::lock_guard<std::mutex> lock(state->userInfosMutex);
-  return state->userInfos.count(uid) > 0;
+  std::lock_guard<std::mutex> lock(state->userDataMutex);
+  return state->userData.count(uid) > 0;
 }
 
 int Server::edit_profile(const Protocol::EditProfileReq &req,
                          Protocol::EmptyRsp &) {
-  std::scoped_lock lock(state->usersMutex, state->userInfosMutex);
+  std::scoped_lock lock(state->usersMutex, state->userDataMutex);
   auto userIt = state->users.find(req.uid);
   if (userIt == state->users.end() || !userIt->second) {
     return Protocol::SERVICE_FAIL | Protocol::NOT_FOUND;
   }
-  auto infoIt = state->userInfos.find(req.uid);
-  if (infoIt == state->userInfos.end()) {
+  auto infoIt = state->userData.find(req.uid);
+  if (infoIt == state->userData.end()) {
     return Protocol::SERVICE_FAIL | Protocol::NOT_FOUND;
   }
-  infoIt->second = req.basicInfo;
+  infoIt->second.basicInfo = req.basicInfo;
   return Protocol::SERVICE_SUCCESS;
 }
 
@@ -172,7 +240,7 @@ int Server::create_room(const Protocol::CreateRoomReq &req,
   auto room = std::make_shared<Room>(room_id, req.maximumPeople, state, user);
   state->rooms.emplace(room_id, room);
   user->set_room_id(room_id);
-  rsp.roomId = room_id;
+  rsp.roomInfo = room->get_info();
   return Protocol::SERVICE_SUCCESS;
 }
 
@@ -206,33 +274,66 @@ int Server::join_room(const Protocol::JoinRoomReq &req,
 
 int Server::leave_room(const Protocol::LeaveRoomReq &req,
                        Protocol::EmptyRsp &) {
-  std::scoped_lock lock(state->usersMutex, state->roomsMutex);
+  std::vector<std::string> member_uids;
+  Protocol::RoomInfo room_info_after_leave;
 
-  auto userIt = state->users.find(req.uid);
-  if (userIt == state->users.end() || !userIt->second) {
-    return Protocol::SERVICE_FAIL | Protocol::NOT_FOUND;
-  }
-  auto member = userIt->second;
-  if (!member->is_in_room()) {
-    return Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR;
+  {
+    std::scoped_lock lock(state->usersMutex, state->roomsMutex);
+
+    std::shared_ptr<User> member;
+    std::shared_ptr<Room> room;
+    const int resolve_code = resolve_room_member_locked(req.uid, member, room);
+    if (resolve_code != Protocol::SERVICE_SUCCESS) {
+      return resolve_code;
+    }
+
+    room->remove_member(req.uid);
+    member->set_room_id(-1);
+
+    room_info_after_leave = room->get_info();
+    member_uids = room->get_member_uids();
+
+    if (room->get_people_count() == 0) {
+      state->rooms.erase(room->get_id());
+    }
   }
 
-  const int room_id = member->get_room_id();
-  auto it = state->rooms.find(room_id);
-  if (it == state->rooms.end()) {
-    return Protocol::SERVICE_FAIL | Protocol::NOT_FOUND;
-  }
-  auto room = it->second;
-  if (!room->is_member(req.uid)) {
-    return Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR;
+  Protocol::LongEnvelope push;
+  push.type = static_cast<int>(Protocol::HomeRequestType::BROADCAST);
+  push.pushMessages = {};
+  push.data = json{{"uid", req.uid}, {"roomInfo", room_info_after_leave}};
+  broadcast_to_members(member_uids, push);
+
+  return Protocol::SERVICE_SUCCESS;
+}
+
+int Server::set_ready(const Protocol::SetReadyReq &req,
+                      Protocol::NoResponseRsp &) {
+
+  std::vector<std::string> member_uids;
+  Protocol::LongEnvelope push;
+  {
+    std::scoped_lock lock(state->usersMutex, state->roomsMutex);
+
+    std::shared_ptr<User> member;
+    std::shared_ptr<Room> room;
+    const int resolve_code = resolve_room_member_locked(req.uid, member, room);
+    if (resolve_code != Protocol::SERVICE_SUCCESS) {
+      return resolve_code;
+    }
+
+    if (!room->set_member_ready(req.uid, req.ready)) {
+      return Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR;
+    }
+    member_uids = room->get_member_uids();
+
+    push.type = static_cast<int>(Protocol::HomeRequestType::BROADCAST);
+    push.pushMessages = {};
+    push.data = json{
+        {"uid", req.uid}, {"ready", req.ready}, {"roomInfo", room->get_info()}};
   }
 
-  room->remove_member(req.uid);
-  member->set_room_id(-1);
-
-  if (room->get_people_count() == 0) {
-    state->rooms.erase(it);
-  }
+  broadcast_to_members(member_uids, push);
   return Protocol::SERVICE_SUCCESS;
 }
 
@@ -247,38 +348,50 @@ int Server::list_rooms(const Protocol::ListRoomsReq &,
   return Protocol::SERVICE_SUCCESS;
 }
 
-Protocol::Envelope LoginServer::dispatch_request(const json &request) {
-  logging::log("[dispatch][login] request={}", request.dump());
+json LoginServer::dispatch_request(const json &request,
+                                   const std::shared_ptr<Channel> &) {
   const auto type = static_cast<Protocol::LoginRequestType>(request.value(
       "type", static_cast<int>(Protocol::LoginRequestType::ERROR)));
+  logging::log("[dispatch][login] type={}({}) request={}",
+               logging::request_type_name(type), static_cast<int>(type),
+               request.dump());
+
   const auto it = std::find_if(
       COMMAND_TABLE.begin(), COMMAND_TABLE.end(),
       [type](const CommandDescriptor &entry) { return entry.type == type; });
   if (it == COMMAND_TABLE.end()) {
-    logging::log("[dispatch][login] unknown type={}", static_cast<int>(type));
-    return Protocol::Envelope::make_env(Protocol::SERVICE_FAIL |
-                                        Protocol::BAD_REQUEST);
+    logging::log("[dispatch][login] unknown type={}({})",
+                 logging::request_type_name(type), static_cast<int>(type));
+    return Protocol::ShortEnvelope::make_env(Protocol::SERVICE_FAIL |
+                                             Protocol::BAD_REQUEST);
   }
+
   const auto env = it->dispatch(*this, request);
-  logging::log("[dispatch][login] type={} code={} message={}",
-               static_cast<int>(type), env.code, env.message);
   return env;
 }
 
-Protocol::Envelope HomeServer::dispatch_request(const json &request) {
-  logging::log("[dispatch][home] request={}", request.dump());
+json HomeServer::dispatch_request(const json &request,
+                                  const std::shared_ptr<Channel> &channel) {
+  if (channel && request.contains("uid") && request.at("uid").is_string()) {
+    bind_user_channel(request.at("uid").get<std::string>(), channel);
+  }
+
   const auto type = static_cast<Protocol::HomeRequestType>(request.value(
       "type", static_cast<int>(Protocol::HomeRequestType::ERROR)));
+  logging::log("[dispatch][home] type={}({}) request={}",
+               logging::request_type_name(type), static_cast<int>(type),
+               request.dump());
+
   const auto it = std::find_if(
       COMMAND_TABLE.begin(), COMMAND_TABLE.end(),
       [type](const CommandDescriptor &entry) { return entry.type == type; });
   if (it == COMMAND_TABLE.end()) {
-    logging::log("[dispatch][home] unknown type={}", static_cast<int>(type));
-    return Protocol::Envelope::make_env(Protocol::SERVICE_FAIL |
-                                        Protocol::BAD_REQUEST);
+    logging::log("[dispatch][home] unknown type={}({})",
+                 logging::request_type_name(type), static_cast<int>(type));
+    return Protocol::ShortEnvelope::make_env(Protocol::SERVICE_FAIL |
+                                             Protocol::BAD_REQUEST);
   }
-  const auto env = it->dispatch(*this, request);
-  logging::log("[dispatch][home] type={} code={} message={}",
-               static_cast<int>(type), env.code, env.message);
-  return env;
+
+  const auto payload = it->dispatch(*this, request);
+  return payload;
 }

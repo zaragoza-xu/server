@@ -7,6 +7,7 @@
 
 #include <asio/io_context.hpp>
 
+#include "logging.h"
 #include "protocol.h"
 #include "room.h"
 #include "server.h"
@@ -48,11 +49,23 @@ TEST(ProtocolTest, CommandTypeMapping) {
   EXPECT_EQ(static_cast<int>(HomeRequestType::LIST_ROOMS), 3);
   EXPECT_EQ(static_cast<int>(HomeRequestType::SEND_MESSAGE), 4);
   EXPECT_EQ(static_cast<int>(HomeRequestType::EDIT_PROFILE), 6);
+  EXPECT_EQ(static_cast<int>(HomeRequestType::SET_READY), 7);
   EXPECT_EQ(static_cast<int>(HomeRequestType::ERROR), 100);
 }
 
+TEST(ProtocolTest, RequestTypeNameMapping) {
+  EXPECT_EQ(logging::request_type_name(Protocol::LoginRequestType::LOGIN),
+            "LOGIN");
+  EXPECT_EQ(logging::request_type_name(Protocol::LoginRequestType::REGISTER),
+            "REGISTER");
+  EXPECT_EQ(logging::request_type_name(Protocol::HomeRequestType::CREATE_ROOM),
+            "CREATE_ROOM");
+  EXPECT_EQ(logging::request_type_name(Protocol::HomeRequestType::SET_READY),
+            "SET_READY");
+}
+
 TEST(ProtocolTest, EnvelopeJsonRoundTrip) {
-  Protocol::Envelope env;
+  Protocol::ShortEnvelope env;
   env.code = Protocol::SERVICE_SUCCESS;
   env.message = "ok";
   env.data = json{{"roomId", 42}, {"roomName", "lobby"}};
@@ -62,7 +75,7 @@ TEST(ProtocolTest, EnvelopeJsonRoundTrip) {
   EXPECT_EQ(j.at("message"), "ok");
   EXPECT_EQ(j.at("data").at("roomId"), 42);
 
-  auto parsed = j.get<Protocol::Envelope>();
+  auto parsed = j.get<Protocol::ShortEnvelope>();
   EXPECT_EQ(parsed.code, Protocol::SERVICE_SUCCESS);
   EXPECT_EQ(parsed.message, "ok");
   EXPECT_EQ(parsed.data.at("roomName"), "lobby");
@@ -82,8 +95,10 @@ TEST(ProtocolTest, RequestResponseJsonRoundTrip) {
   Protocol::PlayerBasicInfo p1{"1001", "alice", 1};
   Protocol::PlayerBasicInfo p2{"1002", "bob", 2};
   Protocol::JoinRoomRsp rsp;
-  rsp.roomInfo = Protocol::RoomInfo{
-      .roomId = 42, .maximumPeople = 6, .basicInfos = {p1, p2}};
+  rsp.roomInfo = Protocol::RoomInfo{.roomId = 42,
+                                    .maximumPeople = 6,
+                                    .basicInfos = {p1, p2},
+                                    .readyUids = {"1001"}};
   json rspJson = rsp;
 
   auto parsedRsp = rspJson.get<Protocol::JoinRoomRsp>();
@@ -103,6 +118,8 @@ TEST(ProtocolTest, RequestResponseJsonRoundTrip) {
   ASSERT_NE(it1002, parsedRsp.roomInfo.basicInfos.end());
   EXPECT_EQ(it1001->uid, "1001");
   EXPECT_EQ(it1002->name, "bob");
+  ASSERT_EQ(parsedRsp.roomInfo.readyUids.size(), 1U);
+  EXPECT_EQ(parsedRsp.roomInfo.readyUids.front(), "1001");
 
   Protocol::EditProfileReq editReq;
   editReq.type = Protocol::HomeRequestType::EDIT_PROFILE;
@@ -123,7 +140,7 @@ TEST(RoomTest, BasicBehavior) {
   auto state = std::make_shared<ServerState>();
 
   Protocol::PlayerBasicInfo creatorInfo{"1", "creator", 1};
-  state->userInfos.emplace(creatorInfo.uid, creatorInfo);
+  state->userData.emplace(creatorInfo.uid, creatorInfo);
   auto creator = std::make_shared<User>(creatorInfo.uid, state);
   Room room(10, 2, state, creator);
 
@@ -134,8 +151,8 @@ TEST(RoomTest, BasicBehavior) {
 
   Protocol::PlayerBasicInfo info2{"2", "u2", 2};
   Protocol::PlayerBasicInfo info3{"3", "u3", 3};
-  state->userInfos.emplace(info2.uid, info2);
-  state->userInfos.emplace(info3.uid, info3);
+  state->userData.emplace(info2.uid, info2);
+  state->userData.emplace(info3.uid, info3);
   auto user2 = std::make_shared<User>(info2.uid, state);
   auto user3 = std::make_shared<User>(info3.uid, state);
 
@@ -155,20 +172,46 @@ TEST(RoomTest, BasicBehavior) {
   EXPECT_FALSE(room.remove_member("404"));
 }
 
+TEST(RoomTest, ReadyStateBehavior) {
+  auto state = std::make_shared<ServerState>();
+
+  Protocol::PlayerBasicInfo creatorInfo{"1", "creator", 1};
+  state->userData.emplace(creatorInfo.uid, creatorInfo);
+  auto creator = std::make_shared<User>(creatorInfo.uid, state);
+  Room room(10, 2, state, creator);
+
+  Protocol::PlayerBasicInfo info2{"2", "u2", 2};
+  state->userData.emplace(info2.uid, info2);
+  auto user2 = std::make_shared<User>(info2.uid, state);
+  ASSERT_TRUE(room.add_member(user2));
+
+  EXPECT_TRUE(room.set_member_ready("1", true));
+  EXPECT_TRUE(room.set_member_ready("2", false));
+  EXPECT_FALSE(room.set_member_ready("404", true));
+
+  const auto info = room.get_info();
+  ASSERT_EQ(info.readyUids.size(), 1U);
+  EXPECT_EQ(info.readyUids.front(), "1");
+
+  ASSERT_TRUE(room.remove_member("1"));
+  const auto infoAfterLeave = room.get_info();
+  EXPECT_TRUE(infoAfterLeave.readyUids.empty());
+}
+
 TEST(RoomTest, GetInfoSkipsMissingProfiles) {
   auto state = std::make_shared<ServerState>();
 
   Protocol::PlayerBasicInfo creatorInfo{"10", "creator", 1};
   Protocol::PlayerBasicInfo info2{"20", "u2", 2};
-  state->userInfos.emplace(creatorInfo.uid, creatorInfo);
-  state->userInfos.emplace(info2.uid, info2);
+  state->userData.emplace(creatorInfo.uid, creatorInfo);
+  state->userData.emplace(info2.uid, info2);
 
   auto creator = std::make_shared<User>(creatorInfo.uid, state);
   auto user2 = std::make_shared<User>(info2.uid, state);
   Room room(99, 2, state, creator);
   ASSERT_TRUE(room.add_member(user2));
 
-  state->userInfos.erase(info2.uid);
+  state->userData.erase(info2.uid);
 
   const auto roomInfo = room.get_info();
   ASSERT_EQ(roomInfo.basicInfos.size(), 1U);
@@ -203,11 +246,12 @@ TEST(ServerBehaviorTest, ErrorPathsCoverage) {
             (Protocol::SERVICE_FAIL | Protocol::NOT_FOUND));
 
   Protocol::EmptyRsp emptyRsp;
-  EXPECT_EQ(server->leave_room(
-                Protocol::LeaveRoomReq{.type = Protocol::HomeRequestType::LEAVE_ROOM,
-                                       .uid = "404"},
-                emptyRsp),
-            (Protocol::SERVICE_FAIL | Protocol::NOT_FOUND));
+  EXPECT_EQ(
+      server->leave_room(
+          Protocol::LeaveRoomReq{.type = Protocol::HomeRequestType::LEAVE_ROOM,
+                                 .uid = "404"},
+          emptyRsp),
+      (Protocol::SERVICE_FAIL | Protocol::NOT_FOUND));
   EXPECT_EQ(server->logout_user(
                 Protocol::LogoutReq{.type = Protocol::LoginRequestType::LOGOUT,
                                     .uid = ""},
@@ -220,10 +264,11 @@ TEST(ServerBehaviorTest, ErrorPathsCoverage) {
             (Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST));
 
   Protocol::RegisterRsp reg1;
-  ASSERT_EQ(server->register_user(
-                Protocol::RegisterReq{.type = Protocol::LoginRequestType::REGISTER},
-                reg1),
-            Protocol::SERVICE_SUCCESS);
+  ASSERT_EQ(
+      server->register_user(
+          Protocol::RegisterReq{.type = Protocol::LoginRequestType::REGISTER},
+          reg1),
+      Protocol::SERVICE_SUCCESS);
   const auto uid1 = reg1.uid;
   ASSERT_EQ(server->login_user(
                 Protocol::LoginReq{.type = Protocol::LoginRequestType::LOGIN,
@@ -232,10 +277,19 @@ TEST(ServerBehaviorTest, ErrorPathsCoverage) {
             Protocol::SERVICE_SUCCESS);
 
   EXPECT_EQ(server->leave_room(
-                Protocol::LeaveRoomReq{.type = Protocol::HomeRequestType::LEAVE_ROOM,
-                                       .uid = uid1},
+                Protocol::LeaveRoomReq{
+                    .type = Protocol::HomeRequestType::LEAVE_ROOM, .uid = uid1},
                 emptyRsp),
             (Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR));
+
+  Protocol::NoResponseRsp setReadyRsp;
+  EXPECT_EQ(
+      server->set_ready(
+          Protocol::SetReadyReq{.type = Protocol::HomeRequestType::SET_READY,
+                                .uid = uid1,
+                                .ready = true},
+          setReadyRsp),
+      (Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR));
 
   ASSERT_EQ(server->create_room(
                 Protocol::CreateRoomReq{
@@ -256,18 +310,20 @@ TEST(ServerBehaviorTest, ErrorPathsCoverage) {
             (Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR));
 
   Protocol::JoinRoomRsp joinRsp;
-  EXPECT_EQ(server->join_room(
-                Protocol::JoinRoomReq{.type = Protocol::HomeRequestType::JOIN_ROOM,
-                                      .roomId = createRsp.roomId,
-                                      .uid = uid1},
-                joinRsp),
-            (Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR));
+  EXPECT_EQ(
+      server->join_room(
+          Protocol::JoinRoomReq{.type = Protocol::HomeRequestType::JOIN_ROOM,
+                                .roomId = createRsp.roomInfo.roomId,
+                                .uid = uid1},
+          joinRsp),
+      (Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR));
 
   Protocol::RegisterRsp reg2;
-  ASSERT_EQ(server->register_user(
-                Protocol::RegisterReq{.type = Protocol::LoginRequestType::REGISTER},
-                reg2),
-            Protocol::SERVICE_SUCCESS);
+  ASSERT_EQ(
+      server->register_user(
+          Protocol::RegisterReq{.type = Protocol::LoginRequestType::REGISTER},
+          reg2),
+      Protocol::SERVICE_SUCCESS);
   const auto uid2 = reg2.uid;
   ASSERT_EQ(server->login_user(
                 Protocol::LoginReq{.type = Protocol::LoginRequestType::LOGIN,
@@ -275,18 +331,27 @@ TEST(ServerBehaviorTest, ErrorPathsCoverage) {
                 loginRsp),
             Protocol::SERVICE_SUCCESS);
 
-  EXPECT_EQ(server->join_room(
-                Protocol::JoinRoomReq{.type = Protocol::HomeRequestType::JOIN_ROOM,
-                                      .roomId = createRsp.roomId,
-                                      .uid = uid2},
-                joinRsp),
-            (Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR));
+  EXPECT_EQ(
+      server->join_room(
+          Protocol::JoinRoomReq{.type = Protocol::HomeRequestType::JOIN_ROOM,
+                                .roomId = createRsp.roomInfo.roomId,
+                                .uid = uid2},
+          joinRsp),
+      (Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR));
+
+  EXPECT_EQ(
+      server->set_ready(
+          Protocol::SetReadyReq{.type = Protocol::HomeRequestType::SET_READY,
+                                .uid = "404",
+                                .ready = true},
+          setReadyRsp),
+      (Protocol::SERVICE_FAIL | Protocol::NOT_FOUND));
 
   Protocol::EditProfileReq editReq{
       .type = Protocol::HomeRequestType::EDIT_PROFILE,
       .uid = uid2,
       .basicInfo = Protocol::PlayerBasicInfo{uid2, "updated", 6}};
-  state->userInfos.erase(uid2);
+  state->userData.erase(uid2);
   EXPECT_EQ(server->edit_profile(editReq, emptyRsp),
             (Protocol::SERVICE_FAIL | Protocol::NOT_FOUND));
 
@@ -324,7 +389,7 @@ TEST_F(ServerChannelBehaviorTest, ServerRegisterLoginAndRoomLifecycle) {
                 },
                 createRsp),
             Protocol::SERVICE_SUCCESS);
-  const auto roomId = createRsp.roomId;
+  const auto roomId = createRsp.roomInfo.roomId;
   EXPECT_GT(roomId, 0);
 
   Protocol::RegisterRsp bobRegRsp;
@@ -373,6 +438,15 @@ TEST_F(ServerChannelBehaviorTest, ServerRegisterLoginAndRoomLifecycle) {
   };
   EXPECT_TRUE(has_uid(joinRsp.roomInfo.basicInfos, aliceUid));
   EXPECT_TRUE(has_uid(joinRsp.roomInfo.basicInfos, bobUid));
+
+  Protocol::NoResponseRsp setReadyRsp;
+  ASSERT_EQ(
+      server->set_ready(
+          Protocol::SetReadyReq{.type = Protocol::HomeRequestType::SET_READY,
+                                .uid = bobUid,
+                                .ready = true},
+          setReadyRsp),
+      Protocol::SERVICE_SUCCESS);
 
   Protocol::ListRoomsRsp listRsp;
   ASSERT_EQ(
@@ -424,48 +498,78 @@ TEST(ServerDispatchTest, DerivedServerDispatchRouting) {
 
   auto registerEnv = loginServer->dispatch_request(json(Protocol::LoginReq{
       .type = Protocol::LoginRequestType::REGISTER, .uid = ""}));
-  ASSERT_EQ(registerEnv.code, Protocol::SERVICE_SUCCESS);
-  const auto uid = registerEnv.data.get<Protocol::RegisterRsp>().uid;
+  auto registerShort = registerEnv.get<Protocol::ShortEnvelope>();
+  ASSERT_EQ(registerShort.code, Protocol::SERVICE_SUCCESS);
+  const auto uid = registerShort.data.get<Protocol::RegisterRsp>().uid;
   ASSERT_FALSE(uid.empty());
 
   auto logoutBeforeLogin =
       loginServer->dispatch_request(json(Protocol::LogoutReq{
           .type = Protocol::LoginRequestType::LOGOUT, .uid = uid}));
-  EXPECT_EQ(logoutBeforeLogin.code,
+  EXPECT_EQ(logoutBeforeLogin.get<Protocol::ShortEnvelope>().code,
             (Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST));
 
   auto reloginEnv = loginServer->dispatch_request(json(Protocol::LoginReq{
       .type = Protocol::LoginRequestType::LOGIN, .uid = uid}));
-  EXPECT_EQ(reloginEnv.code, Protocol::SERVICE_SUCCESS);
+  EXPECT_EQ(reloginEnv.get<Protocol::ShortEnvelope>().code,
+            Protocol::SERVICE_SUCCESS);
 
   auto duplicateLoginEnv =
       loginServer->dispatch_request(json(Protocol::LoginReq{
           .type = Protocol::LoginRequestType::LOGIN, .uid = uid}));
-  EXPECT_EQ(duplicateLoginEnv.code,
+  EXPECT_EQ(duplicateLoginEnv.get<Protocol::ShortEnvelope>().code,
             (Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST));
 
   auto logoutEnv = loginServer->dispatch_request(json(Protocol::LogoutReq{
       .type = Protocol::LoginRequestType::LOGOUT, .uid = uid}));
-  EXPECT_EQ(logoutEnv.code, Protocol::SERVICE_SUCCESS);
+  EXPECT_EQ(logoutEnv.get<Protocol::ShortEnvelope>().code,
+            Protocol::SERVICE_SUCCESS);
 
   auto loginAfterLogoutEnv =
       loginServer->dispatch_request(json(Protocol::LoginReq{
           .type = Protocol::LoginRequestType::LOGIN, .uid = uid}));
-  EXPECT_EQ(loginAfterLogoutEnv.code, Protocol::SERVICE_SUCCESS);
+  EXPECT_EQ(loginAfterLogoutEnv.get<Protocol::ShortEnvelope>().code,
+            Protocol::SERVICE_SUCCESS);
 
   auto badOnLoginServer = loginServer->dispatch_request(json(
       Protocol::ListRoomsReq{.type = Protocol::HomeRequestType::LIST_ROOMS}));
-  EXPECT_EQ(badOnLoginServer.code,
+  EXPECT_EQ(badOnLoginServer.get<Protocol::ShortEnvelope>().code,
             (Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST));
 
   auto listOnHomeServer = homeServer->dispatch_request(json(
       Protocol::ListRoomsReq{.type = Protocol::HomeRequestType::LIST_ROOMS}));
-  EXPECT_EQ(listOnHomeServer.code, Protocol::SERVICE_SUCCESS);
+  EXPECT_EQ(listOnHomeServer.get<Protocol::ShortEnvelope>().code,
+            Protocol::SERVICE_SUCCESS);
 
-  auto badOnHomeServer = homeServer->dispatch_request(
-      json{{"type", static_cast<int>(Protocol::LoginRequestType::ERROR)},
-           {"uid", uid}});
-  EXPECT_EQ(badOnHomeServer.code,
+  auto createRoomEnv =
+      homeServer->dispatch_request(json(Protocol::CreateRoomReq{
+          .type = Protocol::HomeRequestType::CREATE_ROOM,
+          .uid = uid,
+          .maximumPeople = 2,
+      }));
+  ASSERT_EQ(createRoomEnv.get<Protocol::ShortEnvelope>().code,
+            Protocol::SERVICE_SUCCESS);
+
+  auto setReadyEnv = homeServer->dispatch_request(json(Protocol::SetReadyReq{
+      .type = Protocol::HomeRequestType::SET_READY,
+      .uid = uid,
+      .ready = true,
+  }));
+  EXPECT_TRUE(setReadyEnv.is_null());
+
+  auto leaveEnv = homeServer->dispatch_request(json(Protocol::LeaveRoomReq{
+      .type = Protocol::HomeRequestType::LEAVE_ROOM,
+      .uid = uid,
+  }));
+  const auto leaveLong = leaveEnv.get<Protocol::LongEnvelope>();
+  EXPECT_EQ(leaveLong.type,
+            static_cast<int>(Protocol::HomeRequestType::LEAVE_ROOM));
+  EXPECT_TRUE(leaveLong.pushMessages.empty());
+
+  auto badOnHomeServer = homeServer->dispatch_request(json::object(
+      {{"type", static_cast<int>(Protocol::LoginRequestType::ERROR)},
+       {"uid", uid}}));
+  EXPECT_EQ(badOnHomeServer.get<Protocol::ShortEnvelope>().code,
             (Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST));
 }
 

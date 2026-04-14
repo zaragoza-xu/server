@@ -14,19 +14,11 @@
 #include "logging.h"
 #include "protocol.h"
 #include "server.h"
-#include "user.h"
 
 using json = nlohmann::json;
 
 namespace {
-
 constexpr char FRAME_DELIMITER = '\n';
-
-template <typename Req, Protocol::Envelope (Channel::*Method)(const Req &)>
-Protocol::Envelope dispatch_typed(Channel &self, const json &j) {
-  const auto req = j.get<Req>();
-  return (self.*Method)(req);
-}
 } // namespace
 
 asio::awaitable<void> Channel::run() {
@@ -108,21 +100,26 @@ asio::awaitable<bool> Channel::send_message(const std::string &msg) {
 // ----------------------------------------------------------------------
 // Parse, dispatch by type, and respond with a single envelope.
 asio::awaitable<void> Channel::handle_message(std::string &msg) {
-  Protocol::Envelope responseEnv =
-      Protocol::Envelope::make_env(Protocol::SYSTEM_ERROR);
+  json response =
+      json(Protocol::ShortEnvelope::make_env(Protocol::SYSTEM_ERROR));
 
   try {
     auto j = json::parse(msg);
-    responseEnv = server->dispatch_request(j);
+    response = server->dispatch_request(j, shared_from_this());
 
   } catch (const std::exception &e) {
     logging::log("Parse or dispatch failed: {}", e.what());
-    responseEnv = Protocol::Envelope::make_env(Protocol::SYSTEM_ERROR |
-                                               Protocol::DESERIALIZE_FAIL);
+    response = json(Protocol::ShortEnvelope::make_env(
+        Protocol::SYSTEM_ERROR | Protocol::DESERIALIZE_FAIL));
+  }
+
+  if (response.is_null()) {
+    logging::log("[channel][send] skipped: no response requested");
+    co_return;
   }
 
   // Send response outside try-catch to avoid co_await issue
-  bool sent = co_await send_message(json(responseEnv).dump());
+  bool sent = co_await send_message(response.dump());
   if (!sent) {
     logging::log("[channel][send] response send failed");
     co_return;

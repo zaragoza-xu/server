@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstddef>
+#include <list>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -32,6 +33,9 @@ enum class HomeRequestType {
   SEND_MESSAGE = 4,
   //  HEARTBEAT = 5,
   EDIT_PROFILE = 6,
+  SET_READY = 7,
+  BROADCAST = 8,
+  GET_STATE_STATUS = 9,
   ERROR = 100
 };
 
@@ -72,18 +76,20 @@ struct RoomInfo {
   int roomId;
   size_t maximumPeople;
   std::vector<PlayerBasicInfo> basicInfos;
+  std::vector<std::string> readyUids;
 
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(RoomInfo, roomId, maximumPeople,
-                                              basicInfos)
+                                              basicInfos, readyUids)
 };
 
-struct Envelope {
+struct ShortEnvelope {
   // code/message describe status; data carries command-specific payload.
   int code = 0;
-  std::string message;
   json data = json::object();
+  std::string message;
 
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Envelope, code, message, data)
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(ShortEnvelope, code, data,
+                                              message)
 
   struct CodeMessageEntry {
     int mask;
@@ -108,12 +114,31 @@ struct Envelope {
     }
     return "error";
   }
-  static Protocol::Envelope make_env(int code,
-                                     const json &data = json::object()) {
-    Protocol::Envelope env;
+  static Protocol::ShortEnvelope make_env(int code,
+                                          const json &data = json::object()) {
+    Protocol::ShortEnvelope env;
     env.code = code;
     env.message = map_message_from_code(code);
     env.data = data;
+    return env;
+  }
+};
+
+struct LongEnvelope {
+  int type;
+  json data = json::object();
+  std::list<int> pushMessages;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(LongEnvelope, type, data,
+                                              pushMessages)
+
+  static Protocol::LongEnvelope
+  make_env(int type, const json &data = json::object(),
+           const std::list<int> &pushMessages = std::list<int>()) {
+    Protocol::LongEnvelope env;
+    env.type = type;
+    env.data = data;
+    env.pushMessages = pushMessages;
     return env;
   }
 };
@@ -183,7 +208,18 @@ struct SendMessageReq {
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(SendMessageReq, type, content)
 };
 
+struct SetReadyReq {
+  Protocol::HomeRequestType type;
+  std::string uid;
+  bool ready = false;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(SetReadyReq, type, uid, ready)
+};
+
 struct EmptyRsp {};
+
+// Marker response type: long dispatch should not send any direct response.
+struct NoResponseRsp {};
 
 struct RegisterRsp {
   std::string uid;
@@ -198,9 +234,9 @@ struct LoginRsp {
 };
 
 struct CreateRoomRsp {
-  int roomId = -1;
+  RoomInfo roomInfo;
 
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(CreateRoomRsp, roomId)
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(CreateRoomRsp, roomInfo)
 };
 
 struct JoinRoomRsp {
@@ -209,18 +245,15 @@ struct JoinRoomRsp {
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(JoinRoomRsp, roomInfo)
 };
 
+struct SetReadyRsp {
+  RoomInfo roomInfo;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(SetReadyRsp, roomInfo)
+};
+
 struct ListRoomsRsp {
   std::vector<RoomInfo> roomInfos;
 
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(ListRoomsRsp, roomInfos)
-};
-
-struct SendMessagePush {
-  PlayerBasicInfo info;
-  int roomId = -1;
-  std::string content;
-
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(SendMessagePush, info, roomId,
-                                              content)
 };
 } // namespace Protocol
