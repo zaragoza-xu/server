@@ -18,14 +18,17 @@ class Room;
 
 struct ServerState {
   // uid -> profile info (persisted)
-  std::unordered_map<std::string, Protocol::PlayerBasicInfo> userInfos;
+  std::unordered_map<std::string, Protocol::PlayerData> userData;
   // uid -> online user session
   std::unordered_map<std::string, std::shared_ptr<User>> users;
   // room_id -> Room
   std::unordered_map<int, std::shared_ptr<Room>> rooms;
+  // uid -> active lobby channel (weak to avoid ownership cycle)
+  std::unordered_map<std::string, std::weak_ptr<Channel>> userChannels;
   std::mutex usersMutex;
   std::mutex roomsMutex;
-  std::mutex userInfosMutex;
+  std::mutex userDataMutex;
+  std::mutex userChannelsMutex;
   int nextRoomId = 1;
   int nextUid = 1;
 };
@@ -39,17 +42,26 @@ private:
 
   asio::awaitable<void> accept_loop();
 
+  // Resolve an online user and their current room.
+  // Caller must hold usersMutex and roomsMutex.
+  int resolve_room_member_locked(const std::string &uid,
+                                 std::shared_ptr<User> &member,
+                                 std::shared_ptr<Room> &room) const;
+
 public:
   Server(asio::io_context &context, int port,
          std::shared_ptr<ServerState> sharedState = nullptr);
   virtual ~Server() = default;
 
-  using DispatchFn = Protocol::Envelope (*)(Server &, const json &);
-  virtual Protocol::Envelope dispatch_request(const json &request);
+  using DispatchFn = json (*)(Server &, const json &);
+
+  virtual json
+  dispatch_request(const json &request,
+                   const std::shared_ptr<Channel> &channel = nullptr);
 
   template <typename Req, typename Rsp,
             int (Server::*Method)(const Req &, Rsp &)>
-  static Protocol::Envelope dispatch_entry(Server &server, const json &j) {
+  static json dispatch_entry_short(Server &server, const json &j) {
     Rsp rsp;
     Req req = j.get<Req>();
     const int code = (server.*Method)(req, rsp);
@@ -59,7 +71,26 @@ public:
         data = json(rsp);
       }
     }
-    return Protocol::Envelope::make_env(code, data);
+    return json(Protocol::ShortEnvelope::make_env(code, data));
+  }
+
+  template <typename Req, typename Rsp,
+            int (Server::*Method)(const Req &, Rsp &)>
+  static json dispatch_entry_long(Server &server, const json &j) {
+    Rsp rsp;
+    Req req = j.get<Req>();
+    const int code = (server.*Method)(req, rsp);
+    json data = json::object();
+    if (code == Protocol::SERVICE_SUCCESS) {
+      if constexpr (!std::is_same_v<Rsp, Protocol::EmptyRsp>) {
+        data = json(rsp);
+      }
+    } else {
+      return json(Protocol::ShortEnvelope::make_env(code, data));
+    }
+
+    return json(
+        Protocol::LongEnvelope::make_env(static_cast<int>(req.type), data));
   }
 
   // Service APIs: do validation and state transitions atomically.
@@ -69,12 +100,20 @@ public:
   int create_room(const Protocol::CreateRoomReq &, Protocol::CreateRoomRsp &);
   int join_room(const Protocol::JoinRoomReq &, Protocol::JoinRoomRsp &);
   int leave_room(const Protocol::LeaveRoomReq &, Protocol::EmptyRsp &);
+  int set_ready(const Protocol::SetReadyReq &, Protocol::SetReadyRsp &);
   int list_rooms(const Protocol::ListRoomsReq &, Protocol::ListRoomsRsp &);
   int logout_user(const Protocol::LogoutReq &, Protocol::EmptyRsp &);
 
   // Internal/user lifecycle helpers.
   std::shared_ptr<User> get_user(const std::string &uid) const;
   bool user_exists(const std::string &uid) const;
+
+protected:
+  void bind_user_channel(const std::string &uid,
+                         const std::shared_ptr<Channel> &channel);
+  void broadcast_to_members(const std::vector<std::string> &memberUids,
+                            const Protocol::LongEnvelope &message,
+                            const std::string &excludeUid = "");
 };
 
 // login server spec
@@ -84,7 +123,9 @@ public:
               std::shared_ptr<ServerState> sharedState = nullptr)
       : Server(context, port, std::move(sharedState)) {}
 
-  Protocol::Envelope dispatch_request(const json &request) override;
+  json
+  dispatch_request(const json &request,
+                   const std::shared_ptr<Channel> &channel = nullptr) override;
 
 private:
   struct CommandDescriptor {
@@ -93,14 +134,15 @@ private:
   };
   const std::array<LoginServer::CommandDescriptor, 3> COMMAND_TABLE{{
       {Protocol::LoginRequestType::LOGIN,
-       &Server::dispatch_entry<Protocol::LoginReq, Protocol::LoginRsp,
-                               &Server::login_user>},
+       &Server::dispatch_entry_short<Protocol::LoginReq, Protocol::LoginRsp,
+                                     &Server::login_user>},
       {Protocol::LoginRequestType::REGISTER,
-       &Server::dispatch_entry<Protocol::RegisterReq, Protocol::RegisterRsp,
-                               &Server::register_user>},
+       &Server::dispatch_entry_short<Protocol::RegisterReq,
+                                     Protocol::RegisterRsp,
+                                     &Server::register_user>},
       {Protocol::LoginRequestType::LOGOUT,
-       &Server::dispatch_entry<Protocol::LogoutReq, Protocol::EmptyRsp,
-                               &Server::logout_user>},
+       &Server::dispatch_entry_short<Protocol::LogoutReq, Protocol::EmptyRsp,
+                                     &Server::logout_user>},
   }};
 };
 
@@ -110,28 +152,36 @@ public:
   HomeServer(asio::io_context &context, int port,
              std::shared_ptr<ServerState> sharedState = nullptr)
       : Server(context, port, std::move(sharedState)) {}
-  Protocol::Envelope dispatch_request(const json &request) override;
+  json
+  dispatch_request(const json &request,
+                   const std::shared_ptr<Channel> &channel = nullptr) override;
 
 private:
   struct CommandDescriptor {
     Protocol::HomeRequestType type;
     DispatchFn dispatch;
   };
-  const std::array<HomeServer::CommandDescriptor, 5> COMMAND_TABLE{{
+  const std::array<HomeServer::CommandDescriptor, 6> COMMAND_TABLE{{
       {Protocol::HomeRequestType::EDIT_PROFILE,
-       &Server::dispatch_entry<Protocol::EditProfileReq, Protocol::EmptyRsp,
-                               &Server::edit_profile>},
+       &Server::dispatch_entry_short<Protocol::EditProfileReq,
+                                     Protocol::EmptyRsp,
+                                     &Server::edit_profile>},
       {Protocol::HomeRequestType::CREATE_ROOM,
-       &Server::dispatch_entry<Protocol::CreateRoomReq, Protocol::CreateRoomRsp,
-                               &Server::create_room>},
+       &Server::dispatch_entry_short<Protocol::CreateRoomReq,
+                                     Protocol::CreateRoomRsp,
+                                     &Server::create_room>},
       {Protocol::HomeRequestType::JOIN_ROOM,
-       &Server::dispatch_entry<Protocol::JoinRoomReq, Protocol::JoinRoomRsp,
-                               &Server::join_room>},
+       &Server::dispatch_entry_short<
+           Protocol::JoinRoomReq, Protocol::JoinRoomRsp, &Server::join_room>},
       {Protocol::HomeRequestType::LIST_ROOMS,
-       &Server::dispatch_entry<Protocol::ListRoomsReq, Protocol::ListRoomsRsp,
-                               &Server::list_rooms>},
+       &Server::dispatch_entry_short<Protocol::ListRoomsReq,
+                                     Protocol::ListRoomsRsp,
+                                     &Server::list_rooms>},
       {Protocol::HomeRequestType::LEAVE_ROOM,
-       &Server::dispatch_entry<Protocol::LeaveRoomReq, Protocol::EmptyRsp,
-                               &Server::leave_room>},
+       &Server::dispatch_entry_long<Protocol::LeaveRoomReq, Protocol::EmptyRsp,
+                                    &Server::leave_room>},
+      {Protocol::HomeRequestType::SET_READY,
+       &Server::dispatch_entry_long<Protocol::SetReadyReq,
+                                    Protocol::SetReadyRsp, &Server::set_ready>},
   }};
 };

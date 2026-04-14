@@ -5,8 +5,8 @@
 ## 功能概览
 
 - 登录域命令：`LOGIN`、`REGISTER`、`LOGOUT`
-- 大厅域命令：`CREATE_ROOM`、`JOIN_ROOM`、`LEAVE_ROOM`、`LIST_ROOMS`
-- 统一响应信封：`Envelope{code, message, data}`
+- 大厅域命令：`CREATE_ROOM`、`JOIN_ROOM`、`LEAVE_ROOM`、`LIST_ROOMS`、`SET_READY`
+- 响应信封分为短响应与长响应：`ShortEnvelope` / `LongEnvelope`
 - 用户与房间状态由 `ServerState` 维护，并在两个服务实例间共享
 
 ## 当前协议（与代码一致）
@@ -36,11 +36,12 @@
 - `LIST_ROOMS = 3`
 - `SEND_MESSAGE = 4`（协议定义保留，服务端未打通）
 - `EDIT_PROFILE = 6`（协议定义保留，服务端未打通）
+- `SET_READY = 7`
 - `ERROR = 100`
 
 ### 3. 返回结构
 
-统一返回：
+短响应（`ShortEnvelope`）：
 
 ```json
 {
@@ -54,6 +55,38 @@
 - `message`：由 `Envelope::map_message_from_code` 映射
 - `data`：成功时放业务响应，空响应命令返回空对象
 
+长响应（`LongEnvelope`）：
+
+```json
+{
+  "type": 7,
+  "data": {},
+  "pushMessages": []
+}
+```
+
+- `type`：请求类型（整型枚举值）
+- `data`：业务响应体（不包含 `code/message`）
+- `pushMessages`：推送消息类型列表（当前 direct long response 为空）
+
+`SET_READY` 在房间内会触发实时推送：
+
+- 推送信封：`LongEnvelope`
+- `type = 7`（`SET_READY`）
+- `pushMessages = []`
+- `data = {"uid": "变更用户", "ready": true/false, "roomInfo": {...}}`
+
+`LEAVE_ROOM` 成功后会向房间内剩余成员实时推送：
+
+- 推送信封：`LongEnvelope`
+- `type = 2`（`LEAVE_ROOM`）
+- `pushMessages = []`
+- `data = {"uid": "离房用户", "roomInfo": {...}}`
+
+房间信息 `RoomInfo` 额外包含：
+
+- `readyUids`：当前房间中处于准备状态的用户 uid 列表
+
 ### 4. 当前请求/响应类型
 
 请求：
@@ -64,6 +97,7 @@
 - `JoinRoomReq`
 - `LeaveRoomReq`
 - `ListRoomsReq`
+- `SetReadyReq`
 
 响应：
 
@@ -72,6 +106,7 @@
 - `CreateRoomRsp`
 - `JoinRoomRsp`
 - `ListRoomsRsp`
+- `SetReadyRsp`
 - `EmptyRsp`（无业务数据返回的占位类型）
 
 ## 项目结构
@@ -83,6 +118,13 @@
 - `src/channel.cpp`：按行分帧、JSON 解析、分发调用
 - `src/main.cpp`：参数解析、实例启动
 - `tests/unit_tests.cpp`：单元测试
+
+`ServerState` 关键字段：
+
+- `userData`：`uid -> PlayerData`
+- `users`：`uid -> 在线会话`
+- `rooms`：`roomId -> Room`
+- `userChannels`：`uid -> lobby channel(weak_ptr)`
 
 ## 构建
 
