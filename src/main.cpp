@@ -1,109 +1,85 @@
 #include <cstdlib>
 #include <exception>
-#include <getopt.h>
+#include <fstream>
 #include <memory>
-#include <optional>
+#include <set>
 #include <string>
-#include <string_view>
 
 #include <asio/io_context.hpp>
+#include <nlohmann/json.hpp>
 
 #include "logging.h"
 #include "server.h"
 
+using json = nlohmann::json;
+
 namespace {
 
 struct RuntimeConfig {
-  std::optional<int> authPort;
-  std::optional<int> lobbyPort;
+  int authPort = 0;
+  int lobbyPort = 0;
+  int shopPort = 0;
 };
 
-enum class ParseStatus {
-  Ok,
-  Help,
-  Error,
-};
-
-struct ParseResult {
-  ParseStatus status = ParseStatus::Error;
-  RuntimeConfig config;
-};
-
-bool try_parse_port(std::string_view value, int &port) {
-  if (value.empty()) {
-    return false;
-  }
-  try {
-    const int parsed = std::stoi(std::string(value));
-    if (parsed < 1 || parsed > 65535) {
-      return false;
+std::string resolve_config_path(int argc, char **argv) {
+  // Support: --config <path> or --config=<path>
+  for (int i = 1; i < argc; ++i) {
+    std::string arg = argv[i];
+    if (arg == "--config" && i + 1 < argc) {
+      return argv[i + 1];
     }
-    port = parsed;
-    return true;
-  } catch (...) {
-    return false;
+    if (arg.starts_with("--config=")) {
+      return arg.substr(9);
+    }
   }
-}
 
-void print_usage() {
-  logging::log("Usage: server --auth-port <1-65535> --lobby-port <1-65535>");
-}
-
-ParseStatus parse_args(int argc, char **argv, RuntimeConfig &cfg) {
-  static option longOptions[] = {
-      {"auth-port", required_argument, nullptr, 'a'},
-      {"lobby-port", required_argument, nullptr, 'l'},
-      {"help", no_argument, nullptr, 'h'},
-      {nullptr, 0, nullptr, 0},
+  // Search default locations
+  static const char *candidates[] = {
+      "config/server.json",
+      "../config/server.json",
   };
-
-  opterr = 0;
-  optind = 1;
-
-  while (true) {
-    int optionIndex = 0;
-    const int opt = getopt_long(argc, argv, "", longOptions, &optionIndex);
-    if (opt == -1) {
-      break;
+  for (const auto *path : candidates) {
+    if (std::ifstream ifs(path); ifs.good()) {
+      return path;
     }
+  }
+  return "config/server.json";
+}
 
-    if (opt == 'h') {
-      print_usage();
-      return ParseStatus::Help;
-    }
+bool is_valid_port(int port) { return port >= 1 && port <= 65535; }
 
-    if (opt == 'a' || opt == 'l') {
-      int port = 0;
-      if (!try_parse_port(optarg, port)) {
-        print_usage();
-        return ParseStatus::Error;
-      }
-
-      if (opt == 'a') {
-        cfg.authPort = port;
-      } else {
-        cfg.lobbyPort = port;
-      }
-      continue;
-    }
-    print_usage();
-    return ParseStatus::Error;
+bool load_config(const std::string &path, RuntimeConfig &cfg) {
+  std::ifstream ifs(path);
+  if (!ifs.is_open()) {
+    logging::log("Failed to open config file: {}", path);
+    return false;
   }
 
-  if (optind < argc) {
-    print_usage();
-    return ParseStatus::Error;
+  json j;
+  try {
+    j = json::parse(ifs);
+  } catch (const json::parse_error &e) {
+    logging::log("Failed to parse config file: {}", e.what());
+    return false;
   }
-  return ParseStatus::Ok;
+
+  cfg.authPort = j.value("authPort", 0);
+  cfg.lobbyPort = j.value("lobbyPort", 0);
+  cfg.shopPort = j.value("shopPort", 0);
+  return true;
 }
 
 bool validate_config(const RuntimeConfig &cfg) {
-  if (!cfg.authPort.has_value() || !cfg.lobbyPort.has_value()) {
-    print_usage();
+  if (!is_valid_port(cfg.authPort) || !is_valid_port(cfg.lobbyPort) ||
+      !is_valid_port(cfg.shopPort)) {
+    logging::log("All ports must be in range 1-65535 (auth={}, lobby={}, "
+                 "shop={})",
+                 cfg.authPort, cfg.lobbyPort, cfg.shopPort);
     return false;
   }
-  if (cfg.authPort == cfg.lobbyPort) {
-    logging::log("auth and lobby ports must be different");
+  std::set<int> ports{cfg.authPort, cfg.lobbyPort, cfg.shopPort};
+  if (ports.size() != 3) {
+    logging::log("All three ports must be different");
     return false;
   }
   return true;
@@ -112,12 +88,9 @@ bool validate_config(const RuntimeConfig &cfg) {
 
 int main(int argc, char **argv) {
   try {
+    const std::string configPath = resolve_config_path(argc, argv);
     RuntimeConfig cfg;
-    ParseStatus status = parse_args(argc, argv, cfg);
-    if (status == ParseStatus::Help) {
-      return 0;
-    }
-    if (status == ParseStatus::Error) {
+    if (!load_config(configPath, cfg)) {
       return 1;
     }
     if (!validate_config(cfg)) {
@@ -127,12 +100,12 @@ int main(int argc, char **argv) {
     asio::io_context io_context;
     auto sharedState = std::make_shared<ServerState>();
     auto authServer =
-        std::make_shared<LoginServer>(io_context, *cfg.authPort, sharedState);
+        std::make_shared<LoginServer>(io_context, cfg.authPort, sharedState);
     auto lobbyServer =
-        std::make_shared<HomeServer>(io_context, *cfg.lobbyPort, sharedState);
+        std::make_shared<HomeServer>(io_context, cfg.lobbyPort, sharedState);
 
-    logging::log("Auth service listening on port {}", *cfg.authPort);
-    logging::log("Lobby service listening on port {}", *cfg.lobbyPort);
+    logging::log("Auth service listening on port {}", cfg.authPort);
+    logging::log("Lobby service listening on port {}", cfg.lobbyPort);
 
     io_context.run();
 

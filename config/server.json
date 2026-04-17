@@ -1,0 +1,5 @@
+{
+  "authPort": 8765,
+  "lobbyPort": 8766,
+  "shopPort": 8767
+}
