@@ -48,9 +48,18 @@ TEST(ProtocolTest, CommandTypeMapping) {
   EXPECT_EQ(static_cast<int>(HomeRequestType::LEAVE_ROOM), 2);
   EXPECT_EQ(static_cast<int>(HomeRequestType::LIST_ROOMS), 3);
   EXPECT_EQ(static_cast<int>(HomeRequestType::SEND_MESSAGE), 4);
+  EXPECT_EQ(static_cast<int>(HomeRequestType::HEARTBEAT), 5);
   EXPECT_EQ(static_cast<int>(HomeRequestType::EDIT_PROFILE), 6);
   EXPECT_EQ(static_cast<int>(HomeRequestType::SET_READY), 7);
+  EXPECT_EQ(static_cast<int>(HomeRequestType::BROADCAST), 8);
+  EXPECT_EQ(static_cast<int>(HomeRequestType::GET_STATE_STATUS), 9);
   EXPECT_EQ(static_cast<int>(HomeRequestType::ERROR), 100);
+
+  using Protocol::ShopRequestType;
+  EXPECT_EQ(static_cast<int>(ShopRequestType::SHOP_INIT), 0);
+  EXPECT_EQ(static_cast<int>(ShopRequestType::SHOP_MOVE_CURSOR), 1);
+  EXPECT_EQ(static_cast<int>(ShopRequestType::SHOP_BUY_ITEM), 2);
+  EXPECT_EQ(static_cast<int>(ShopRequestType::ERROR), 100);
 }
 
 TEST(ProtocolTest, RequestTypeNameMapping) {
@@ -62,6 +71,8 @@ TEST(ProtocolTest, RequestTypeNameMapping) {
             "CREATE_ROOM");
   EXPECT_EQ(logging::request_type_name(Protocol::HomeRequestType::SET_READY),
             "SET_READY");
+  EXPECT_EQ(logging::request_type_name(Protocol::ShopRequestType::SHOP_INIT),
+            "SHOP_INIT");
 }
 
 TEST(ProtocolTest, EnvelopeJsonRoundTrip) {
@@ -140,7 +151,8 @@ TEST(RoomTest, BasicBehavior) {
   auto state = std::make_shared<ServerState>();
 
   Protocol::PlayerBasicInfo creatorInfo{"1", "creator", 1};
-  state->userData.emplace(creatorInfo.uid, creatorInfo);
+  state->userData.emplace(creatorInfo.uid,
+                          Protocol::PlayerData{.basicInfo = creatorInfo});
   auto creator = std::make_shared<User>(creatorInfo.uid, state);
   Room room(10, 2, state, creator);
 
@@ -151,8 +163,8 @@ TEST(RoomTest, BasicBehavior) {
 
   Protocol::PlayerBasicInfo info2{"2", "u2", 2};
   Protocol::PlayerBasicInfo info3{"3", "u3", 3};
-  state->userData.emplace(info2.uid, info2);
-  state->userData.emplace(info3.uid, info3);
+  state->userData.emplace(info2.uid, Protocol::PlayerData{.basicInfo = info2});
+  state->userData.emplace(info3.uid, Protocol::PlayerData{.basicInfo = info3});
   auto user2 = std::make_shared<User>(info2.uid, state);
   auto user3 = std::make_shared<User>(info3.uid, state);
 
@@ -176,12 +188,13 @@ TEST(RoomTest, ReadyStateBehavior) {
   auto state = std::make_shared<ServerState>();
 
   Protocol::PlayerBasicInfo creatorInfo{"1", "creator", 1};
-  state->userData.emplace(creatorInfo.uid, creatorInfo);
+  state->userData.emplace(creatorInfo.uid,
+                          Protocol::PlayerData{.basicInfo = creatorInfo});
   auto creator = std::make_shared<User>(creatorInfo.uid, state);
   Room room(10, 2, state, creator);
 
   Protocol::PlayerBasicInfo info2{"2", "u2", 2};
-  state->userData.emplace(info2.uid, info2);
+  state->userData.emplace(info2.uid, Protocol::PlayerData{.basicInfo = info2});
   auto user2 = std::make_shared<User>(info2.uid, state);
   ASSERT_TRUE(room.add_member(user2));
 
@@ -203,8 +216,9 @@ TEST(RoomTest, GetInfoSkipsMissingProfiles) {
 
   Protocol::PlayerBasicInfo creatorInfo{"10", "creator", 1};
   Protocol::PlayerBasicInfo info2{"20", "u2", 2};
-  state->userData.emplace(creatorInfo.uid, creatorInfo);
-  state->userData.emplace(info2.uid, info2);
+  state->userData.emplace(creatorInfo.uid,
+                          Protocol::PlayerData{.basicInfo = creatorInfo});
+  state->userData.emplace(info2.uid, Protocol::PlayerData{.basicInfo = info2});
 
   auto creator = std::make_shared<User>(creatorInfo.uid, state);
   auto user2 = std::make_shared<User>(info2.uid, state);
@@ -346,6 +360,16 @@ TEST(ServerBehaviorTest, ErrorPathsCoverage) {
                                 .ready = true},
           setReadyRsp),
       (Protocol::SERVICE_FAIL | Protocol::NOT_FOUND));
+
+  Protocol::NoResponseRsp shopMoveRsp;
+  EXPECT_EQ(server->shop_move_cursor(
+                Protocol::ShopMoveCursorReq{
+                    .type = Protocol::ShopRequestType::SHOP_MOVE_CURSOR,
+                    .uid = uid1,
+                    .direction = 2,
+                },
+                shopMoveRsp),
+            (Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST));
 
   Protocol::EditProfileReq editReq{
       .type = Protocol::HomeRequestType::EDIT_PROFILE,
@@ -573,6 +597,63 @@ TEST(ServerDispatchTest, DerivedServerDispatchRouting) {
             (Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST));
 }
 
+TEST(ServerDispatchTest, ShopServerDispatchRouting) {
+  asio::io_context ioContext;
+  auto state = std::make_shared<ServerState>();
+  auto loginServer = std::make_shared<LoginServer>(ioContext, 0, state);
+  auto homeServer = std::make_shared<HomeServer>(ioContext, 0, state);
+  auto shopServer = std::make_shared<ShopServer>(ioContext, 0, state);
+
+  // Register + login a user
+  auto registerEnv = loginServer->dispatch_request(json(Protocol::LoginReq{
+      .type = Protocol::LoginRequestType::REGISTER, .uid = ""}));
+  const auto uid = registerEnv.get<Protocol::ShortEnvelope>()
+                       .data.get<Protocol::RegisterRsp>()
+                       .uid;
+
+  loginServer->dispatch_request(json(Protocol::LoginReq{
+      .type = Protocol::LoginRequestType::LOGIN, .uid = uid}));
+
+  // Create room via home server
+  auto createEnv = homeServer->dispatch_request(json(Protocol::CreateRoomReq{
+      .type = Protocol::HomeRequestType::CREATE_ROOM,
+      .uid = uid,
+      .maximumPeople = 2,
+  }));
+  ASSERT_EQ(createEnv.get<Protocol::ShortEnvelope>().code,
+            Protocol::SERVICE_SUCCESS);
+
+  // Shop init via shop server
+  auto shopInitEnv = shopServer->dispatch_request(json(Protocol::ShopInitReq{
+      .type = Protocol::ShopRequestType::SHOP_INIT, .uid = uid}));
+  EXPECT_EQ(shopInitEnv.get<Protocol::ShortEnvelope>().code,
+            Protocol::SERVICE_SUCCESS);
+
+  // Shop move cursor via shop server (long dispatch, returns null)
+  auto shopMoveEnv =
+      shopServer->dispatch_request(json(Protocol::ShopMoveCursorReq{
+          .type = Protocol::ShopRequestType::SHOP_MOVE_CURSOR,
+          .uid = uid,
+          .direction = 1,
+      }));
+  EXPECT_TRUE(shopMoveEnv.is_null());
+
+  // Unknown type on shop server → BAD_REQUEST
+  auto badOnShopServer = shopServer->dispatch_request(json::object(
+      {{"type", static_cast<int>(Protocol::ShopRequestType::ERROR)},
+       {"uid", uid}}));
+  EXPECT_EQ(badOnShopServer.get<Protocol::ShortEnvelope>().code,
+            (Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST));
+
+  // Shop type sent to home server — numeric value 0 maps to CREATE_ROOM
+  // on home server, so it won't be BAD_REQUEST but a different command.
+  // Use a value outside home server's command table to verify rejection.
+  auto badTypeOnHome =
+      homeServer->dispatch_request(json::object({{"type", 99}, {"uid", uid}}));
+  EXPECT_EQ(badTypeOnHome.get<Protocol::ShortEnvelope>().code,
+            (Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST));
+}
+
 TEST_F(ServerChannelBehaviorTest, LoginAfterLogoutUsesStoredProfile) {
   Protocol::RegisterRsp registerRsp;
   ASSERT_EQ(server->register_user(
@@ -602,6 +683,112 @@ TEST_F(ServerChannelBehaviorTest, LoginAfterLogoutUsesStoredProfile) {
 
   EXPECT_TRUE(server->user_exists(uid));
   EXPECT_EQ(server->get_user(uid), nullptr);
+}
+
+TEST_F(ServerChannelBehaviorTest, ShopFlowBehavior) {
+  Protocol::RegisterRsp aliceRegRsp;
+  ASSERT_EQ(
+      server->register_user(
+          Protocol::RegisterReq{.type = Protocol::LoginRequestType::REGISTER},
+          aliceRegRsp),
+      Protocol::SERVICE_SUCCESS);
+  const auto aliceUid = aliceRegRsp.uid;
+
+  Protocol::RegisterRsp bobRegRsp;
+  ASSERT_EQ(
+      server->register_user(
+          Protocol::RegisterReq{.type = Protocol::LoginRequestType::REGISTER},
+          bobRegRsp),
+      Protocol::SERVICE_SUCCESS);
+  const auto bobUid = bobRegRsp.uid;
+
+  Protocol::LoginRsp loginRsp;
+  ASSERT_EQ(server->login_user(
+                Protocol::LoginReq{.type = Protocol::LoginRequestType::LOGIN,
+                                   .uid = aliceUid},
+                loginRsp),
+            Protocol::SERVICE_SUCCESS);
+  ASSERT_EQ(server->login_user(
+                Protocol::LoginReq{.type = Protocol::LoginRequestType::LOGIN,
+                                   .uid = bobUid},
+                loginRsp),
+            Protocol::SERVICE_SUCCESS);
+
+  Protocol::CreateRoomRsp createRsp;
+  ASSERT_EQ(server->create_room(
+                Protocol::CreateRoomReq{
+                    .type = Protocol::HomeRequestType::CREATE_ROOM,
+                    .uid = aliceUid,
+                    .maximumPeople = 2},
+                createRsp),
+            Protocol::SERVICE_SUCCESS);
+
+  Protocol::JoinRoomRsp joinRsp;
+  ASSERT_EQ(
+      server->join_room(
+          Protocol::JoinRoomReq{.type = Protocol::HomeRequestType::JOIN_ROOM,
+                                .roomId = createRsp.roomInfo.roomId,
+                                .uid = bobUid},
+          joinRsp),
+      Protocol::SERVICE_SUCCESS);
+
+  Protocol::ShopInitRsp initRsp;
+  ASSERT_EQ(
+      server->shop_init(
+          Protocol::ShopInitReq{.type = Protocol::ShopRequestType::SHOP_INIT,
+                                .uid = aliceUid},
+          initRsp),
+      Protocol::SERVICE_SUCCESS);
+  EXPECT_FALSE(initRsp.itemIds.empty());
+  EXPECT_EQ(initRsp.playerInfos.size(), 2U);
+
+  Protocol::NoResponseRsp moveRsp;
+  ASSERT_EQ(server->shop_move_cursor(
+                Protocol::ShopMoveCursorReq{
+                    .type = Protocol::ShopRequestType::SHOP_MOVE_CURSOR,
+                    .uid = aliceUid,
+                    .direction = 1,
+                },
+                moveRsp),
+            Protocol::SERVICE_SUCCESS);
+
+  // After move_cursor, get the selected item via shop_init
+  Protocol::ShopInitRsp afterMoveRsp;
+  ASSERT_EQ(
+      server->shop_init(
+          Protocol::ShopInitReq{.type = Protocol::ShopRequestType::SHOP_INIT,
+                                .uid = aliceUid},
+          afterMoveRsp),
+      Protocol::SERVICE_SUCCESS);
+  ASSERT_GT(afterMoveRsp.itemIds.size(), 1U);
+  // Use second item (direction=1 moves from index 0 to index 1)
+  const std::string selectedItemId = afterMoveRsp.itemIds.at(1);
+  ASSERT_FALSE(selectedItemId.empty());
+
+  Protocol::NoResponseRsp buyRsp;
+  ASSERT_EQ(server->shop_buy_item(
+                Protocol::ShopBuyItemReq{
+                    .type = Protocol::ShopRequestType::SHOP_BUY_ITEM,
+                    .uid = aliceUid,
+                    .itemId = selectedItemId},
+                buyRsp),
+            Protocol::SERVICE_SUCCESS);
+
+  EXPECT_EQ(server->shop_buy_item(
+                Protocol::ShopBuyItemReq{
+                    .type = Protocol::ShopRequestType::SHOP_BUY_ITEM,
+                    .uid = bobUid,
+                    .itemId = selectedItemId},
+                buyRsp),
+            (Protocol::SERVICE_FAIL | Protocol::SHOP_ITEM_TAKEN));
+
+  EXPECT_EQ(server->shop_buy_item(
+                Protocol::ShopBuyItemReq{
+                    .type = Protocol::ShopRequestType::SHOP_BUY_ITEM,
+                    .uid = bobUid,
+                    .itemId = "unknown-item"},
+                buyRsp),
+            (Protocol::SERVICE_FAIL | Protocol::SHOP_INVALID_ITEM));
 }
 
 } // namespace

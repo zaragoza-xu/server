@@ -1,9 +1,18 @@
 #include "room.h"
 
+#include <algorithm>
 #include <mutex>
 
 #include "server.h"
 #include "user.h"
+
+int Room::get_item_index(const std::string &itemId) const {
+  auto it = std::find(shopItemIds.begin(), shopItemIds.end(), itemId);
+  if (it == shopItemIds.end()) {
+    return -1;
+  }
+  return static_cast<int>(std::distance(shopItemIds.begin(), it));
+}
 
 Room::Room(int roomId, size_t maximumPeople, std::shared_ptr<ServerState> state,
            std::shared_ptr<User> creator)
@@ -11,6 +20,17 @@ Room::Room(int roomId, size_t maximumPeople, std::shared_ptr<ServerState> state,
   const auto creator_uid = creator->get_uid();
   uids.push_back(creator_uid);
   readyStates.emplace(creator_uid, false);
+  ownedItemsByUid.emplace(creator_uid, std::vector<std::string>{});
+
+  auto shared_state = this->state.lock();
+  if (shared_state && !shared_state->shopCatalogItemIds.empty()) {
+    shopItemIds = shared_state->shopCatalogItemIds;
+    shopCatalogVersion = shared_state->shopCatalogVersion;
+  } else {
+    // Fallback static catalog.
+    shopItemIds = {"sword", "shield", "potion", "boots", "wand"};
+    shopCatalogVersion = "embedded-v1";
+  }
 }
 
 Protocol::RoomInfo Room::get_info() const {
@@ -59,5 +79,95 @@ bool Room::add_member(std::shared_ptr<User> user) {
     return false; // room is full
   uids.push_back(uid);
   readyStates.emplace(uid, false);
+  ownedItemsByUid.emplace(uid, std::vector<std::string>{});
   return true;
+}
+
+bool Room::get_shop_init(Protocol::ShopInitRsp &rsp) const {
+  auto shared_state = state.lock();
+  if (!shared_state) {
+    return false;
+  }
+
+  std::scoped_lock lock(roomMutex, shared_state->userDataMutex);
+  rsp.itemIds = shopItemIds;
+  rsp.playerInfos.clear();
+  rsp.playerInfos.reserve(uids.size());
+
+  for (const auto &uid : uids) {
+    auto user_it = shared_state->userData.find(uid);
+    if (user_it == shared_state->userData.end()) {
+      continue;
+    }
+    Protocol::ShopPlayerInfo info;
+    info.playerInfo = user_it->second.basicInfo;
+    auto owned_it = ownedItemsByUid.find(uid);
+    if (owned_it != ownedItemsByUid.end()) {
+      info.ownedItems = owned_it->second;
+    }
+    rsp.playerInfos.push_back(std::move(info));
+  }
+  return true;
+}
+
+bool Room::move_shop_cursor(
+    const std::string &uid, int direction,
+    std::vector<Protocol::ShopSelectStatus> &selectStatus) {
+  std::lock_guard<std::mutex> lock(roomMutex);
+  if (shopItemIds.empty()) {
+    return false;
+  }
+
+  auto sel_it = selectedItemByUid.find(uid);
+  int index = 0;
+  if (sel_it != selectedItemByUid.end()) {
+    const int existing = get_item_index(sel_it->second);
+    if (existing >= 0) {
+      index = existing;
+    }
+  }
+
+  if (direction == 0) {
+    index = (index - 1 + static_cast<int>(shopItemIds.size())) %
+            static_cast<int>(shopItemIds.size());
+  } else if (direction == 1) {
+    index = (index + 1) % static_cast<int>(shopItemIds.size());
+  }
+
+  selectedItemByUid[uid] = shopItemIds[static_cast<size_t>(index)];
+
+  selectStatus.clear();
+  selectStatus.reserve(uids.size());
+  for (const auto &member_uid : uids) {
+    Protocol::ShopSelectStatus status;
+    status.uid = member_uid;
+    auto it = selectedItemByUid.find(member_uid);
+    if (it != selectedItemByUid.end()) {
+      status.selectItemId = it->second;
+    }
+    selectStatus.push_back(std::move(status));
+  }
+  return true;
+}
+
+int Room::buy_shop_item(const std::string &uid, const std::string &itemId) {
+  std::lock_guard<std::mutex> lock(roomMutex);
+  if (get_item_index(itemId) < 0) {
+    return Protocol::SERVICE_FAIL | Protocol::SHOP_INVALID_ITEM;
+  }
+  if (takenItems.count(itemId) > 0) {
+    return Protocol::SERVICE_FAIL | Protocol::SHOP_ITEM_TAKEN;
+  }
+
+  takenItems.emplace(itemId);
+  auto &owned = ownedItemsByUid[uid];
+  owned.push_back(itemId);
+
+  for (auto &[select_uid, select_item] : selectedItemByUid) {
+    if (select_item == itemId) {
+      select_item.clear();
+    }
+  }
+
+  return Protocol::SERVICE_SUCCESS;
 }
