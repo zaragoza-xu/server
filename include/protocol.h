@@ -31,11 +31,18 @@ enum class HomeRequestType {
   LEAVE_ROOM = 2,
   LIST_ROOMS = 3,
   SEND_MESSAGE = 4,
-  //  HEARTBEAT = 5,
+  HEARTBEAT = 5,
   EDIT_PROFILE = 6,
   SET_READY = 7,
   BROADCAST = 8,
   GET_STATE_STATUS = 9,
+  ERROR = 100
+};
+
+enum class ShopRequestType {
+  SHOP_INIT = 0,
+  SHOP_MOVE_CURSOR = 1,
+  SHOP_BUY_ITEM = 2,
   ERROR = 100
 };
 
@@ -52,6 +59,9 @@ enum Code : int {
   BAD_REQUEST = 1 << 6,
   NOT_FOUND = 1 << 7,
   ROOM_STATE_ERROR = 1 << 8,
+  SHOP_INVALID_ITEM = 1 << 9,
+  SHOP_ITEM_TAKEN = 1 << 10,
+  SHOP_NOT_MEMBER = 1 << 11,
 
   SERVICE_SUCCESS = SUCCESS,
   SERVICE_FAIL = FAIL,
@@ -65,13 +75,6 @@ struct PlayerBasicInfo {
 
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(PlayerBasicInfo, uid, name, color)
 };
-
-struct PlayerData {
-  PlayerBasicInfo basicInfo;
-
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(PlayerData, basicInfo)
-};
-
 struct RoomInfo {
   int roomId;
   size_t maximumPeople;
@@ -80,6 +83,28 @@ struct RoomInfo {
 
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(RoomInfo, roomId, maximumPeople,
                                               basicInfos, readyUids)
+};
+
+class BattleInfo {
+  RoomInfo roomInfo;
+  std::vector<std::string> items;
+  // staticAttribute : BattleAttribute;
+  // currentAttribute : BattleAttribute;
+  std::string mapNodeId;
+};
+
+struct PlayerData {
+  enum {
+    NotBattleRelated = 0,
+    Shop = 1,
+    Map = 2,
+    InBattle = 3,
+  };
+  int status = NotBattleRelated;
+  BattleInfo battleInfo;
+  PlayerBasicInfo basicInfo;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(PlayerData, basicInfo)
 };
 
 struct ShortEnvelope {
@@ -96,9 +121,12 @@ struct ShortEnvelope {
     const char *message;
   };
 
-  static constexpr std::array<CodeMessageEntry, 4> CODE_MESSAGE_TABLE{{
+  static constexpr std::array<CodeMessageEntry, 7> CODE_MESSAGE_TABLE{{
       {Protocol::NOT_FOUND, "not found"},
       {Protocol::ROOM_STATE_ERROR, "room state error"},
+      {Protocol::SHOP_INVALID_ITEM, "invalid shop item"},
+      {Protocol::SHOP_ITEM_TAKEN, "shop item already taken"},
+      {Protocol::SHOP_NOT_MEMBER, "user not in room"},
       {Protocol::BAD_REQUEST, "bad request"},
       {Protocol::DESERIALIZE_FAIL, "deserialize failed"},
   }};
@@ -216,6 +244,30 @@ struct SetReadyReq {
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(SetReadyReq, type, uid, ready)
 };
 
+struct ShopInitReq {
+  Protocol::ShopRequestType type;
+  std::string uid;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(ShopInitReq, type, uid)
+};
+
+struct ShopMoveCursorReq {
+  Protocol::ShopRequestType type;
+  std::string uid;
+  int direction = 0; // 0 - up, 1 - down
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(ShopMoveCursorReq, type, uid,
+                                              direction)
+};
+
+struct ShopBuyItemReq {
+  Protocol::ShopRequestType type;
+  std::string uid;
+  std::string itemId;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(ShopBuyItemReq, type, uid, itemId)
+};
+
 struct EmptyRsp {};
 
 // Marker response type: long dispatch should not send any direct response.
@@ -249,6 +301,42 @@ struct SetReadyRsp {
   RoomInfo roomInfo;
 
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(SetReadyRsp, roomInfo)
+};
+
+struct ShopPlayerInfo {
+  PlayerBasicInfo playerInfo;
+  std::vector<std::string> ownedItems;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(ShopPlayerInfo, playerInfo,
+                                              ownedItems)
+};
+
+struct ShopInitRsp {
+  std::vector<std::string> itemIds;
+  std::vector<ShopPlayerInfo> playerInfos;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(ShopInitRsp, itemIds, playerInfos)
+};
+
+struct ShopSelectStatus {
+  std::string uid;
+  std::string selectItemId;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(ShopSelectStatus, uid,
+                                              selectItemId)
+};
+
+struct ShopMoveCursorRsp {
+  std::vector<ShopSelectStatus> selectStatus;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(ShopMoveCursorRsp, selectStatus)
+};
+
+struct ShopBuyItemRsp {
+  std::string uid;
+  std::string itemId;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(ShopBuyItemRsp, uid, itemId)
 };
 
 struct ListRoomsRsp {

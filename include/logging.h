@@ -37,13 +37,33 @@ inline std::string_view request_type_name(Protocol::HomeRequestType type) {
     return "LIST_ROOMS";
   case Protocol::HomeRequestType::SEND_MESSAGE:
     return "SEND_MESSAGE";
+  case Protocol::HomeRequestType::HEARTBEAT:
+    return "HEARTBEAT";
   case Protocol::HomeRequestType::EDIT_PROFILE:
     return "EDIT_PROFILE";
   case Protocol::HomeRequestType::SET_READY:
     return "SET_READY";
+  case Protocol::HomeRequestType::BROADCAST:
+    return "BROADCAST";
+  case Protocol::HomeRequestType::GET_STATE_STATUS:
+    return "GET_STATE_STATUS";
   case Protocol::HomeRequestType::ERROR:
     return "ERROR";
   }
   return "UNKNOWN_HOME_TYPE";
+}
+
+inline std::string_view request_type_name(Protocol::ShopRequestType type) {
+  switch (type) {
+  case Protocol::ShopRequestType::SHOP_INIT:
+    return "SHOP_INIT";
+  case Protocol::ShopRequestType::SHOP_MOVE_CURSOR:
+    return "SHOP_MOVE_CURSOR";
+  case Protocol::ShopRequestType::SHOP_BUY_ITEM:
+    return "SHOP_BUY_ITEM";
+  case Protocol::ShopRequestType::ERROR:
+    return "ERROR";
+  }
+  return "UNKNOWN_SHOP_TYPE";
 }
 } // namespace logging

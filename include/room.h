@@ -6,6 +6,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "protocol.h"
@@ -20,7 +21,14 @@ private:
   size_t maximumPeople;
   std::vector<std::string> uids;
   std::unordered_map<std::string, bool> readyStates;
+  std::vector<std::string> shopItemIds;
+  std::string shopCatalogVersion;
+  std::unordered_set<std::string> takenItems;
+  std::unordered_map<std::string, std::string> selectedItemByUid;
+  std::unordered_map<std::string, std::vector<std::string>> ownedItemsByUid;
   mutable std::mutex roomMutex;
+
+  int get_item_index(const std::string &itemId) const;
 
 public:
   Room(int roomId, size_t maximumPeople, std::shared_ptr<ServerState> state,
@@ -36,6 +44,11 @@ public:
 
   // Add member if not present and capacity allows.
   bool add_member(std::shared_ptr<User> user);
+
+  bool get_shop_init(Protocol::ShopInitRsp &rsp) const;
+  bool move_shop_cursor(const std::string &uid, int direction,
+                        std::vector<Protocol::ShopSelectStatus> &selectStatus);
+  int buy_shop_item(const std::string &uid, const std::string &itemId);
 
   bool set_member_ready(const std::string &uid, bool ready) {
     std::lock_guard<std::mutex> lock(roomMutex);
@@ -55,6 +68,8 @@ public:
     }
     uids.erase(it);
     readyStates.erase(uid);
+    selectedItemByUid.erase(uid);
+    ownedItemsByUid.erase(uid);
     return true;
   }
 

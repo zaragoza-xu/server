@@ -103,9 +103,13 @@ int main(int argc, char **argv) {
         std::make_shared<LoginServer>(io_context, cfg.authPort, sharedState);
     auto lobbyServer =
         std::make_shared<HomeServer>(io_context, cfg.lobbyPort, sharedState);
+    auto shopServer =
+        std::make_shared<ShopServer>(io_context, cfg.shopPort, sharedState);
 
+    logging::log("Config loaded from: {}", configPath);
     logging::log("Auth service listening on port {}", cfg.authPort);
     logging::log("Lobby service listening on port {}", cfg.lobbyPort);
+    logging::log("Shop service listening on port {}", cfg.shopPort);
 
     io_context.run();
 

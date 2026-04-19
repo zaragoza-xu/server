@@ -1,0 +1,10 @@
+{
+  "version": "shop-v1",
+  "itemIds": [
+    "sword",
+    "shield",
+    "potion",
+    "boots",
+    "wand"
+  ]
+}

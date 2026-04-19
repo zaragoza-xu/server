@@ -1,6 +1,8 @@
 #include "server.h"
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -21,6 +23,56 @@
 
 using namespace asio::ip;
 
+namespace {
+struct ShopCatalogConfig {
+  std::string version = "v1";
+  std::vector<std::string> itemIds;
+};
+
+ShopCatalogConfig default_shop_catalog() {
+  return ShopCatalogConfig{
+      .version = "embedded-v1",
+      .itemIds = {"sword", "shield", "potion", "boots", "wand"}};
+}
+
+ShopCatalogConfig load_shop_catalog() {
+  const std::vector<std::filesystem::path> candidates = {
+      "config/shop_catalog.json", "../config/shop_catalog.json",
+      "../../config/shop_catalog.json"};
+
+  for (const auto &path : candidates) {
+    std::ifstream input(path);
+    if (!input.is_open()) {
+      continue;
+    }
+    try {
+      json j;
+      input >> j;
+      ShopCatalogConfig cfg = default_shop_catalog();
+      if (j.contains("version") && j.at("version").is_string()) {
+        cfg.version = j.at("version").get<std::string>();
+      }
+      if (!j.contains("itemIds") || !j.at("itemIds").is_array()) {
+        continue;
+      }
+      cfg.itemIds.clear();
+      for (const auto &entry : j.at("itemIds")) {
+        if (entry.is_string()) {
+          cfg.itemIds.push_back(entry.get<std::string>());
+        }
+      }
+      if (cfg.itemIds.empty()) {
+        continue;
+      }
+      return cfg;
+    } catch (...) {
+      continue;
+    }
+  }
+  return default_shop_catalog();
+}
+} // namespace
+
 Server::Server(asio::io_context &context, int port,
                std::shared_ptr<ServerState> sharedState)
     : ioContext(context), port(port),
@@ -28,6 +80,11 @@ Server::Server(asio::io_context &context, int port,
       state(std::move(sharedState)) {
   if (!state) {
     state = std::make_shared<ServerState>();
+  }
+  if (state->shopCatalogItemIds.empty()) {
+    const auto cfg = load_shop_catalog();
+    state->shopCatalogVersion = cfg.version;
+    state->shopCatalogItemIds = cfg.itemIds;
   }
 
   asio::co_spawn(ioContext, accept_loop(), asio::detached);
@@ -136,7 +193,8 @@ int Server::register_user(const Protocol::RegisterReq &req,
 
   Protocol::PlayerBasicInfo storedInfo = {"", "", 0};
   storedInfo.uid = std::to_string(state->nextUid++);
-  state->userData.emplace(storedInfo.uid, (Protocol::PlayerData){storedInfo});
+  state->userData.emplace(storedInfo.uid,
+                          (Protocol::PlayerData){.basicInfo = storedInfo});
 
   rsp.uid = storedInfo.uid;
   return Protocol::SERVICE_SUCCESS;
@@ -337,6 +395,84 @@ int Server::set_ready(const Protocol::SetReadyReq &req,
   return Protocol::SERVICE_SUCCESS;
 }
 
+int Server::shop_init(const Protocol::ShopInitReq &req,
+                      Protocol::ShopInitRsp &rsp) {
+  std::scoped_lock lock(state->usersMutex, state->roomsMutex);
+
+  std::shared_ptr<User> member;
+  std::shared_ptr<Room> room;
+  const int resolve_code = resolve_room_member_locked(req.uid, member, room);
+  if (resolve_code != Protocol::SERVICE_SUCCESS) {
+    return resolve_code;
+  }
+
+  if (!room->get_shop_init(rsp)) {
+    return Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR;
+  }
+  return Protocol::SERVICE_SUCCESS;
+}
+
+int Server::shop_move_cursor(const Protocol::ShopMoveCursorReq &req,
+                             Protocol::NoResponseRsp &) {
+  if (req.direction != 0 && req.direction != 1) {
+    return Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST;
+  }
+
+  std::vector<std::string> member_uids;
+  std::vector<Protocol::ShopSelectStatus> selectStatus;
+  {
+    std::scoped_lock lock(state->usersMutex, state->roomsMutex);
+
+    std::shared_ptr<User> member;
+    std::shared_ptr<Room> room;
+    const int resolve_code = resolve_room_member_locked(req.uid, member, room);
+    if (resolve_code != Protocol::SERVICE_SUCCESS) {
+      return resolve_code;
+    }
+
+    if (!room->move_shop_cursor(req.uid, req.direction, selectStatus)) {
+      return Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR;
+    }
+    member_uids = room->get_member_uids();
+  }
+
+  Protocol::LongEnvelope push;
+  push.type = static_cast<int>(Protocol::ShopRequestType::SHOP_MOVE_CURSOR);
+  push.pushMessages = {};
+  push.data = json{{"selectStatus", selectStatus}};
+  broadcast_to_members(member_uids, push);
+  return Protocol::SERVICE_SUCCESS;
+}
+
+int Server::shop_buy_item(const Protocol::ShopBuyItemReq &req,
+                          Protocol::NoResponseRsp &) {
+  std::vector<std::string> member_uids;
+  {
+    std::scoped_lock lock(state->usersMutex, state->roomsMutex);
+
+    std::shared_ptr<User> member;
+    std::shared_ptr<Room> room;
+    const int resolve_code = resolve_room_member_locked(req.uid, member, room);
+    if (resolve_code != Protocol::SERVICE_SUCCESS) {
+      return resolve_code;
+    }
+
+    const int buy_code = room->buy_shop_item(req.uid, req.itemId);
+    if (buy_code != Protocol::SERVICE_SUCCESS) {
+      return buy_code;
+    }
+
+    member_uids = room->get_member_uids();
+  }
+
+  Protocol::LongEnvelope push;
+  push.type = static_cast<int>(Protocol::ShopRequestType::SHOP_BUY_ITEM);
+  push.pushMessages = {};
+  push.data = json{{"uid", req.uid}, {"itemId", req.itemId}};
+  broadcast_to_members(member_uids, push);
+  return Protocol::SERVICE_SUCCESS;
+}
+
 int Server::list_rooms(const Protocol::ListRoomsReq &,
                        Protocol::ListRoomsRsp &rsp) {
   std::lock_guard<std::mutex> lock(state->roomsMutex);
@@ -387,6 +523,32 @@ json HomeServer::dispatch_request(const json &request,
       [type](const CommandDescriptor &entry) { return entry.type == type; });
   if (it == COMMAND_TABLE.end()) {
     logging::log("[dispatch][home] unknown type={}({})",
+                 logging::request_type_name(type), static_cast<int>(type));
+    return Protocol::ShortEnvelope::make_env(Protocol::SERVICE_FAIL |
+                                             Protocol::BAD_REQUEST);
+  }
+
+  const auto payload = it->dispatch(*this, request);
+  return payload;
+}
+
+json ShopServer::dispatch_request(const json &request,
+                                  const std::shared_ptr<Channel> &channel) {
+  if (channel && request.contains("uid") && request.at("uid").is_string()) {
+    bind_user_channel(request.at("uid").get<std::string>(), channel);
+  }
+
+  const auto type = static_cast<Protocol::ShopRequestType>(request.value(
+      "type", static_cast<int>(Protocol::ShopRequestType::ERROR)));
+  logging::log("[dispatch][shop] type={}({}) request={}",
+               logging::request_type_name(type), static_cast<int>(type),
+               request.dump());
+
+  const auto it = std::find_if(
+      COMMAND_TABLE.begin(), COMMAND_TABLE.end(),
+      [type](const CommandDescriptor &entry) { return entry.type == type; });
+  if (it == COMMAND_TABLE.end()) {
+    logging::log("[dispatch][shop] unknown type={}({})",
                  logging::request_type_name(type), static_cast<int>(type));
     return Protocol::ShortEnvelope::make_env(Protocol::SERVICE_FAIL |
                                              Protocol::BAD_REQUEST);

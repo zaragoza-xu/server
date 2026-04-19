@@ -24,8 +24,11 @@ struct ServerState {
   std::unordered_map<std::string, std::shared_ptr<User>> users;
   // room_id -> Room
   std::unordered_map<int, std::shared_ptr<Room>> rooms;
-  // uid -> active lobby channel (weak to avoid ownership cycle)
+  // uid -> active channel for server push messages across services (weak to
+  // avoid ownership cycle)
   std::unordered_map<std::string, std::weak_ptr<Channel>> userChannels;
+  std::vector<std::string> shopCatalogItemIds;
+  std::string shopCatalogVersion = "v1";
   std::mutex usersMutex;
   std::mutex roomsMutex;
   std::mutex userDataMutex;
@@ -107,6 +110,11 @@ public:
   int join_room(const Protocol::JoinRoomReq &, Protocol::JoinRoomRsp &);
   int leave_room(const Protocol::LeaveRoomReq &, Protocol::EmptyRsp &);
   int set_ready(const Protocol::SetReadyReq &, Protocol::NoResponseRsp &);
+  int shop_init(const Protocol::ShopInitReq &, Protocol::ShopInitRsp &);
+  int shop_move_cursor(const Protocol::ShopMoveCursorReq &,
+                       Protocol::NoResponseRsp &);
+  int shop_buy_item(const Protocol::ShopBuyItemReq &,
+                    Protocol::NoResponseRsp &);
   int list_rooms(const Protocol::ListRoomsReq &, Protocol::ListRoomsRsp &);
   int logout_user(const Protocol::LogoutReq &, Protocol::EmptyRsp &);
 
@@ -189,5 +197,35 @@ private:
       {Protocol::HomeRequestType::SET_READY,
        &Server::dispatch_entry_long<
            Protocol::SetReadyReq, Protocol::NoResponseRsp, &Server::set_ready>},
+  }};
+};
+
+// shop server spec
+class ShopServer : public Server {
+public:
+  ShopServer(asio::io_context &context, int port,
+             std::shared_ptr<ServerState> sharedState = nullptr)
+      : Server(context, port, std::move(sharedState)) {}
+  json
+  dispatch_request(const json &request,
+                   const std::shared_ptr<Channel> &channel = nullptr) override;
+
+private:
+  struct CommandDescriptor {
+    Protocol::ShopRequestType type;
+    DispatchFn dispatch;
+  };
+  const std::array<ShopServer::CommandDescriptor, 3> COMMAND_TABLE{{
+      {Protocol::ShopRequestType::SHOP_INIT,
+       &Server::dispatch_entry_long<Protocol::ShopInitReq,
+                                    Protocol::ShopInitRsp, &Server::shop_init>},
+      {Protocol::ShopRequestType::SHOP_MOVE_CURSOR,
+       &Server::dispatch_entry_long<Protocol::ShopMoveCursorReq,
+                                    Protocol::NoResponseRsp,
+                                    &Server::shop_move_cursor>},
+      {Protocol::ShopRequestType::SHOP_BUY_ITEM,
+       &Server::dispatch_entry_long<Protocol::ShopBuyItemReq,
+                                    Protocol::NoResponseRsp,
+                                    &Server::shop_buy_item>},
   }};
 };
