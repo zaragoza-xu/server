@@ -24,15 +24,11 @@ struct ServerState {
   std::unordered_map<std::string, std::shared_ptr<User>> users;
   // room_id -> Room
   std::unordered_map<int, std::shared_ptr<Room>> rooms;
-  // uid -> active channel for server push messages across services (weak to
-  // avoid ownership cycle)
-  std::unordered_map<std::string, std::weak_ptr<Channel>> userChannels;
   std::vector<std::string> shopCatalogItemIds;
   std::string shopCatalogVersion = "v1";
   std::mutex usersMutex;
   std::mutex roomsMutex;
   std::mutex userDataMutex;
-  std::mutex userChannelsMutex;
   int nextRoomId = 1;
   int nextUid = 1;
 };
@@ -123,6 +119,11 @@ public:
   bool user_exists(const std::string &uid) const;
 
 protected:
+  // uid -> active channel for server push (per-server-instance, weak to avoid
+  // ownership cycle)
+  std::unordered_map<std::string, std::weak_ptr<Channel>> userChannels;
+  std::mutex userChannelsMutex;
+
   void bind_user_channel(const std::string &uid,
                          const std::shared_ptr<Channel> &channel);
   void broadcast_to_members(const std::vector<std::string> &memberUids,

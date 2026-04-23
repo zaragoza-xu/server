@@ -128,8 +128,8 @@ void Server::bind_user_channel(const std::string &uid,
   if (uid.empty() || !channel) {
     return;
   }
-  std::lock_guard<std::mutex> lock(state->userChannelsMutex);
-  state->userChannels[uid] = channel;
+  std::lock_guard<std::mutex> lock(userChannelsMutex);
+  userChannels[uid] = channel;
 }
 
 void Server::broadcast_to_members(const std::vector<std::string> &memberUids,
@@ -139,19 +139,19 @@ void Server::broadcast_to_members(const std::vector<std::string> &memberUids,
   std::vector<std::shared_ptr<Channel>> targets;
 
   {
-    std::lock_guard<std::mutex> lock(state->userChannelsMutex);
+    std::lock_guard<std::mutex> lock(userChannelsMutex);
     targets.reserve(memberUids.size());
     for (const auto &uid : memberUids) {
       if (!excludeUid.empty() && uid == excludeUid) {
         continue;
       }
-      auto it = state->userChannels.find(uid);
-      if (it == state->userChannels.end()) {
+      auto it = userChannels.find(uid);
+      if (it == userChannels.end()) {
         continue;
       }
       auto channel = it->second.lock();
       if (!channel) {
-        state->userChannels.erase(it);
+        userChannels.erase(it);
         continue;
       }
       targets.push_back(std::move(channel));

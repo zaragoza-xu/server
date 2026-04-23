@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <list>
 #include <string>
-#include <string_view>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -14,8 +13,6 @@ using json = nlohmann::json;
 // Protocol definitions using JSON format
 namespace Protocol {
 
-constexpr std::string_view HEADER = "CHAT";
-constexpr int HEADER_SIZE = 4;
 constexpr int MAX_MESSAGE_SIZE = 65536;
 
 enum class LoginRequestType {
@@ -91,6 +88,25 @@ class BattleInfo {
   // staticAttribute : BattleAttribute;
   // currentAttribute : BattleAttribute;
   std::string mapNodeId;
+};
+
+struct MapNode {
+  enum NodeType { Normal, Elite, Event, Boss };
+
+  NodeType type;
+  int column;
+  int rowInColumn;
+  std::vector<MapNode> nextNodes;
+  float difficulty;
+};
+
+struct TowerMap {
+
+  std::vector<std::vector<MapNode>> columns;
+  MapNode startNode;
+  MapNode bossNode;
+  int minCol = 12, maxCol = 15;
+  int minRow = 1, maxRow = 3;
 };
 
 struct PlayerData {
