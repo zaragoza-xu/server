@@ -62,13 +62,20 @@ add_executable(server "${SRC_LIST}")
 target_include_directories(server PUBLIC "${PROJECT_SOURCE_DIR}/include" "${PROJECT_SOURCE_DIR}/third_party")
 target_link_libraries(server PRIVATE asio::asio nlohmann_json::nlohmann_json Threads::Threads)
 
+add_library(collision
+	demos/collision.cpp
+)
+target_include_directories(collision PUBLIC "${PROJECT_SOURCE_DIR}/demos")
+
 add_executable(collision_demo
 	demos/collision_demo.cpp
 )
+target_link_libraries(collision_demo PRIVATE collision)
 
 if(SERVER_BUILD_TESTS)
 	set(TEST_SRC_LIST ${SRC_LIST})
 	list(FILTER TEST_SRC_LIST EXCLUDE REGEX "src/main\\.cpp$")
+	file(GLOB UNIT_TEST_FILES CONFIGURE_DEPENDS "tests/unit_tests/*_tests.cpp")
 
 	find_package(GTest CONFIG QUIET)
 
@@ -86,19 +93,31 @@ if(SERVER_BUILD_TESTS)
 		FetchContent_MakeAvailable(googletest)
 	endif()
 
-	add_executable(unit_tests
-		tests/unit_tests.cpp
-		"${TEST_SRC_LIST}"
-	)
-	target_include_directories(unit_tests PUBLIC "${PROJECT_SOURCE_DIR}/include")
-	target_link_libraries(unit_tests PRIVATE
-		asio::asio
-		nlohmann_json::nlohmann_json
-		GTest::gtest
-		GTest::gtest_main
-		Threads::Threads
-	)
-
 	include(GoogleTest)
-	gtest_discover_tests(unit_tests)
+
+	add_custom_target(unit_tests)
+
+	foreach(TEST_FILE IN LISTS UNIT_TEST_FILES)
+		get_filename_component(TEST_NAME "${TEST_FILE}" NAME_WE)
+
+		add_executable("${TEST_NAME}"
+			"${TEST_FILE}"
+			"${TEST_SRC_LIST}"
+		)
+		target_include_directories("${TEST_NAME}" PUBLIC
+			"${PROJECT_SOURCE_DIR}/include"
+			"${PROJECT_SOURCE_DIR}/demos"
+		)
+		target_link_libraries("${TEST_NAME}" PRIVATE
+			asio::asio
+			nlohmann_json::nlohmann_json
+			collision
+			GTest::gtest
+			GTest::gtest_main
+			Threads::Threads
+		)
+
+		add_dependencies(unit_tests "${TEST_NAME}")
+		gtest_discover_tests("${TEST_NAME}" TEST_PREFIX "${TEST_NAME}::")
+	endforeach()
 endif()

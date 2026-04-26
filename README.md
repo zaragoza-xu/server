@@ -121,7 +121,7 @@
 - `src/server.cpp`：连接接入、状态机和业务方法实现
 - `src/channel.cpp`：按行分帧、JSON 解析、分发调用
 - `src/main.cpp`：参数解析、实例启动
-- `tests/unit_tests.cpp`：单元测试
+- `tests/unit_tests/`：单元测试目录（`server_channel_behavior_tests.cpp`、`collision_detection_tests.cpp`）
 
 `ServerState` 关键字段：
 
@@ -146,11 +146,20 @@ cmake --preset release
 cmake --build build
 ```
 
-## 测试
+## 单元测试
 
 ```bash
-cmake --build build --target unit_tests
+cmake --preset release
+cmake --build --preset release --target unit_tests
 ctest --test-dir build --output-on-failure
+
+# 运行不同测试文件
+ctest --test-dir build -R "^protocol_tests::" --output-on-failure
+ctest --test-dir build -R "^room_behavior_tests::" --output-on-failure
+ctest --test-dir build -R "^server_auth_room_lifecycle_tests::" --output-on-failure
+ctest --test-dir build -R "^server_dispatch_tests::" --output-on-failure
+ctest --test-dir build -R "^server_error_paths_tests::" --output-on-failure
+ctest --test-dir build -R "^collision_detection_tests::" --output-on-failure
 ```
 
 ## 运行
@@ -175,8 +184,8 @@ ctest --test-dir build --output-on-failure
 
 ```bash
 cmake --preset debug
-cmake --build --preset debug --target collision_demo
-./build/collision_demo
+cmake --build --preset debug --target collision_demo collision_detection_tests
+./build/debug/collision_demo
 ```
 
 ## 示例请求
