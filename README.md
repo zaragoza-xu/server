@@ -163,6 +163,22 @@ ctest --test-dir build --output-on-failure
 - `lobby-port` 处理房间命令
 - 两个端口必须不同
 
+## 碰撞检测 Demo
+
+新增了一个独立的控制台 demo：`collision_demo`，演示轴对齐长方形（AABB）之间的 2D 碰撞检测。
+
+- 物体均为长方形
+- 边界与坐标轴平行
+- 使用 AABB vs AABB 重叠判定
+
+构建并运行：
+
+```bash
+cmake --preset debug
+cmake --build --preset debug --target collision_demo
+./build/collision_demo
+```
+
 ## 示例请求
 
 注册：

@@ -62,6 +62,10 @@ add_executable(server "${SRC_LIST}")
 target_include_directories(server PUBLIC "${PROJECT_SOURCE_DIR}/include" "${PROJECT_SOURCE_DIR}/third_party")
 target_link_libraries(server PRIVATE asio::asio nlohmann_json::nlohmann_json Threads::Threads)
 
+add_executable(collision_demo
+	demos/collision_demo.cpp
+)
+
 if(SERVER_BUILD_TESTS)
 	set(TEST_SRC_LIST ${SRC_LIST})
 	list(FILTER TEST_SRC_LIST EXCLUDE REGEX "src/main\\.cpp$")
