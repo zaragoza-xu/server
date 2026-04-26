@@ -58,8 +58,7 @@ if(NOT nlohmann_json_FOUND)
 	FetchContent_MakeAvailable(nlohmann_json)
 endif()
 
-add_executable(server "${SRC_LIST}"
-	src/map.cpp)
+add_executable(server "${SRC_LIST}")
 target_include_directories(server PUBLIC "${PROJECT_SOURCE_DIR}/include" "${PROJECT_SOURCE_DIR}/third_party")
 target_link_libraries(server PRIVATE asio::asio nlohmann_json::nlohmann_json Threads::Threads)
 

@@ -43,6 +43,16 @@ enum class ShopRequestType {
   ERROR = 100
 };
 
+enum class MapRequestType {
+  MAP_INIT = 0,
+  MAP_MOVE = 1,
+};
+
+enum class MapResponseType {
+  MAP_INIT = 0,
+  MAP_SYNC = 1,
+};
+
 enum Code : int {
   // Bitmask: low bits indicate status, higher bits carry detail flags.
   SUCCESS = 1,
@@ -87,26 +97,33 @@ class BattleInfo {
   std::vector<std::string> items;
   // staticAttribute : BattleAttribute;
   // currentAttribute : BattleAttribute;
-  std::string mapNodeId;
+  int mapNodeId = -1;
 };
+
+enum NodeType { NORMAL, ELITE, EVENT, BOSS };
 
 struct MapNode {
-  enum NodeType { Normal, Elite, Event, Boss };
+  int nodeId = -1;
+  NodeType type = NodeType::NORMAL;
+  std::vector<int> nextId;
 
-  NodeType type;
-  int column;
-  int rowInColumn;
-  std::vector<MapNode> nextNodes;
-  float difficulty;
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(MapNode, nodeId, type, nextId)
 };
 
-struct TowerMap {
+struct MapInitReq {
+  Protocol::MapRequestType type;
+  int roomId = -1;
+  std::string uid;
 
-  std::vector<std::vector<MapNode>> columns;
-  MapNode startNode;
-  MapNode bossNode;
-  int minCol = 12, maxCol = 15;
-  int minRow = 1, maxRow = 3;
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(MapInitReq, type, roomId, uid)
+};
+
+struct MapMoveReq {
+  Protocol::MapRequestType type;
+  std::string uid;
+  int selectId = -1;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(MapMoveReq, type, uid, selectId)
 };
 
 struct PlayerData {
@@ -353,6 +370,25 @@ struct ShopBuyItemRsp {
   std::string itemId;
 
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(ShopBuyItemRsp, uid, itemId)
+};
+
+struct MapInitRsp {
+  std::vector<MapNode> map;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(MapInitRsp, map)
+};
+
+struct MapSync {
+  std::string uid;
+  int selectId = -1;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(MapSync, uid, selectId)
+};
+
+struct MapSyncRsp {
+  std::vector<MapSync> selectStatus;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(MapSyncRsp, selectStatus)
 };
 
 struct ListRoomsRsp {

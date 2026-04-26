@@ -73,6 +73,8 @@ TEST(ProtocolTest, RequestTypeNameMapping) {
             "SET_READY");
   EXPECT_EQ(logging::request_type_name(Protocol::ShopRequestType::SHOP_INIT),
             "SHOP_INIT");
+  EXPECT_EQ(logging::request_type_name(Protocol::MapRequestType::MAP_INIT),
+            "MAP_INIT");
 }
 
 TEST(ProtocolTest, EnvelopeJsonRoundTrip) {
@@ -145,6 +147,24 @@ TEST(ProtocolTest, RequestResponseJsonRoundTrip) {
   EXPECT_EQ(parsedEdit.basicInfo.uid, "1001");
   EXPECT_EQ(parsedEdit.basicInfo.name, "alice");
   EXPECT_EQ(parsedEdit.basicInfo.color, 7);
+
+  Protocol::MapInitRsp mapInitRsp;
+  mapInitRsp.map = {
+      {.nodeId = 0, .type = Protocol::NodeType::NORMAL, .nextId = {1, 2}},
+      {.nodeId = 1, .type = Protocol::NodeType::ELITE, .nextId = {}}};
+  json mapInitJson = mapInitRsp;
+  auto parsedMapInit = mapInitJson.get<Protocol::MapInitRsp>();
+  ASSERT_EQ(parsedMapInit.map.size(), 2U);
+  EXPECT_EQ(parsedMapInit.map.front().nodeId, 0);
+  EXPECT_EQ(parsedMapInit.map.front().nextId.size(), 2U);
+
+  Protocol::MapSyncRsp mapSyncRsp;
+  mapSyncRsp.selectStatus = {{.uid = "1001", .selectId = 0},
+                             {.uid = "1002", .selectId = 2}};
+  json mapSyncJson = mapSyncRsp;
+  auto parsedMapSync = mapSyncJson.get<Protocol::MapSyncRsp>();
+  ASSERT_EQ(parsedMapSync.selectStatus.size(), 2U);
+  EXPECT_EQ(parsedMapSync.selectStatus.back().selectId, 2);
 }
 
 TEST(RoomTest, BasicBehavior) {
@@ -230,6 +250,114 @@ TEST(RoomTest, GetInfoSkipsMissingProfiles) {
   const auto roomInfo = room.get_info();
   ASSERT_EQ(roomInfo.basicInfos.size(), 1U);
   EXPECT_EQ(roomInfo.basicInfos.front().uid, creatorInfo.uid);
+}
+
+TEST(RoomTest, MapInitAndMoveBehavior) {
+  auto state = std::make_shared<ServerState>();
+
+  Protocol::PlayerBasicInfo creatorInfo{"1", "creator", 1};
+  Protocol::PlayerBasicInfo info2{"2", "u2", 2};
+  state->userData.emplace(creatorInfo.uid,
+                          Protocol::PlayerData{.basicInfo = creatorInfo});
+  state->userData.emplace(info2.uid, Protocol::PlayerData{.basicInfo = info2});
+
+  auto creator = std::make_shared<User>(creatorInfo.uid, state);
+  auto user2 = std::make_shared<User>(info2.uid, state);
+  Room room(88, 2, state, creator);
+  ASSERT_TRUE(room.add_member(user2));
+
+  Protocol::MapInitRsp initRsp;
+  ASSERT_TRUE(room.get_map_init(initRsp));
+  ASSERT_FALSE(initRsp.map.empty());
+
+  std::unordered_set<int> incoming;
+  for (const auto &node : initRsp.map) {
+    for (int nextId : node.nextId) {
+      incoming.insert(nextId);
+    }
+  }
+
+  std::vector<int> roots;
+  for (const auto &node : initRsp.map) {
+    if (incoming.count(node.nodeId) == 0) {
+      roots.push_back(node.nodeId);
+    }
+  }
+  ASSERT_FALSE(roots.empty());
+
+  std::vector<Protocol::MapSync> syncStatus;
+  bool committed = false;
+  ASSERT_TRUE(room.move_map("1", roots.front(), syncStatus, committed));
+  EXPECT_FALSE(committed);
+  ASSERT_EQ(syncStatus.size(), 2U);
+  auto creatorStatus = std::find_if(
+      syncStatus.begin(), syncStatus.end(),
+      [](const Protocol::MapSync &status) { return status.uid == "1"; });
+  auto user2Status = std::find_if(
+      syncStatus.begin(), syncStatus.end(),
+      [](const Protocol::MapSync &status) { return status.uid == "2"; });
+  ASSERT_NE(creatorStatus, syncStatus.end());
+  ASSERT_NE(user2Status, syncStatus.end());
+  EXPECT_EQ(creatorStatus->selectId, roots.front());
+  EXPECT_EQ(user2Status->selectId, -1);
+
+  int invalidFirstMove = -1;
+  for (const auto &node : initRsp.map) {
+    if (incoming.count(node.nodeId) != 0) {
+      invalidFirstMove = node.nodeId;
+      break;
+    }
+  }
+  ASSERT_NE(invalidFirstMove, -1);
+  EXPECT_FALSE(room.move_map("2", invalidFirstMove, syncStatus, committed));
+
+  ASSERT_TRUE(room.move_map("2", roots.front(), syncStatus, committed));
+  EXPECT_TRUE(committed);
+  creatorStatus = std::find_if(
+      syncStatus.begin(), syncStatus.end(),
+      [](const Protocol::MapSync &status) { return status.uid == "1"; });
+  user2Status = std::find_if(
+      syncStatus.begin(), syncStatus.end(),
+      [](const Protocol::MapSync &status) { return status.uid == "2"; });
+  ASSERT_NE(creatorStatus, syncStatus.end());
+  ASSERT_NE(user2Status, syncStatus.end());
+  EXPECT_EQ(creatorStatus->selectId, roots.front());
+  EXPECT_EQ(user2Status->selectId, roots.front());
+
+  const auto selectedRoot = std::find_if(initRsp.map.begin(), initRsp.map.end(),
+                                         [&](const Protocol::MapNode &node) {
+                                           return node.nodeId == roots.front();
+                                         });
+  ASSERT_NE(selectedRoot, initRsp.map.end());
+  ASSERT_FALSE(selectedRoot->nextId.empty());
+
+  ASSERT_TRUE(
+      room.move_map("1", selectedRoot->nextId.front(), syncStatus, committed));
+  EXPECT_FALSE(committed);
+  creatorStatus = std::find_if(
+      syncStatus.begin(), syncStatus.end(),
+      [](const Protocol::MapSync &status) { return status.uid == "1"; });
+  user2Status = std::find_if(
+      syncStatus.begin(), syncStatus.end(),
+      [](const Protocol::MapSync &status) { return status.uid == "2"; });
+  ASSERT_NE(creatorStatus, syncStatus.end());
+  ASSERT_NE(user2Status, syncStatus.end());
+  EXPECT_EQ(creatorStatus->selectId, selectedRoot->nextId.front());
+  EXPECT_EQ(user2Status->selectId, -1);
+
+  ASSERT_TRUE(
+      room.move_map("2", selectedRoot->nextId.front(), syncStatus, committed));
+  EXPECT_TRUE(committed);
+  creatorStatus = std::find_if(
+      syncStatus.begin(), syncStatus.end(),
+      [](const Protocol::MapSync &status) { return status.uid == "1"; });
+  user2Status = std::find_if(
+      syncStatus.begin(), syncStatus.end(),
+      [](const Protocol::MapSync &status) { return status.uid == "2"; });
+  ASSERT_NE(creatorStatus, syncStatus.end());
+  ASSERT_NE(user2Status, syncStatus.end());
+  EXPECT_EQ(creatorStatus->selectId, selectedRoot->nextId.front());
+  EXPECT_EQ(user2Status->selectId, selectedRoot->nextId.front());
 }
 
 TEST(ServerBehaviorTest, ErrorPathsCoverage) {
@@ -626,8 +754,10 @@ TEST(ServerDispatchTest, ShopServerDispatchRouting) {
   // Shop init via shop server
   auto shopInitEnv = shopServer->dispatch_request(json(Protocol::ShopInitReq{
       .type = Protocol::ShopRequestType::SHOP_INIT, .uid = uid}));
-  EXPECT_EQ(shopInitEnv.get<Protocol::ShortEnvelope>().code,
-            Protocol::SERVICE_SUCCESS);
+  const auto shopInitLong = shopInitEnv.get<Protocol::LongEnvelope>();
+  EXPECT_EQ(shopInitLong.type,
+            static_cast<int>(Protocol::ShopRequestType::SHOP_INIT));
+  EXPECT_FALSE(shopInitLong.data.get<Protocol::ShopInitRsp>().itemIds.empty());
 
   // Shop move cursor via shop server (long dispatch, returns null)
   auto shopMoveEnv =
@@ -651,6 +781,61 @@ TEST(ServerDispatchTest, ShopServerDispatchRouting) {
   auto badTypeOnHome =
       homeServer->dispatch_request(json::object({{"type", 99}, {"uid", uid}}));
   EXPECT_EQ(badTypeOnHome.get<Protocol::ShortEnvelope>().code,
+            (Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST));
+}
+
+TEST(ServerDispatchTest, MapServerDispatchRouting) {
+  asio::io_context ioContext;
+  auto state = std::make_shared<ServerState>();
+  auto loginServer = std::make_shared<LoginServer>(ioContext, 0, state);
+  auto homeServer = std::make_shared<HomeServer>(ioContext, 0, state);
+  auto mapServer = std::make_shared<MapServer>(ioContext, 0, state);
+
+  auto registerEnv = loginServer->dispatch_request(json(Protocol::LoginReq{
+      .type = Protocol::LoginRequestType::REGISTER, .uid = ""}));
+  const auto uid = registerEnv.get<Protocol::ShortEnvelope>()
+                       .data.get<Protocol::RegisterRsp>()
+                       .uid;
+
+  loginServer->dispatch_request(json(Protocol::LoginReq{
+      .type = Protocol::LoginRequestType::LOGIN, .uid = uid}));
+  homeServer->dispatch_request(json(Protocol::CreateRoomReq{
+      .type = Protocol::HomeRequestType::CREATE_ROOM,
+      .uid = uid,
+      .maximumPeople = 2,
+  }));
+
+  auto mapInitEnv = mapServer->dispatch_request(json(Protocol::MapInitReq{
+      .type = Protocol::MapRequestType::MAP_INIT, .uid = uid}));
+  const auto mapInitLong = mapInitEnv.get<Protocol::LongEnvelope>();
+  EXPECT_EQ(mapInitLong.type,
+            static_cast<int>(Protocol::MapRequestType::MAP_INIT));
+
+  const auto mapInitRsp = mapInitLong.data.get<Protocol::MapInitRsp>();
+  ASSERT_FALSE(mapInitRsp.map.empty());
+
+  std::unordered_set<int> incoming;
+  for (const auto &node : mapInitRsp.map) {
+    for (int nextId : node.nextId) {
+      incoming.insert(nextId);
+    }
+  }
+  const auto rootIt = std::find_if(mapInitRsp.map.begin(), mapInitRsp.map.end(),
+                                   [&](const Protocol::MapNode &node) {
+                                     return incoming.count(node.nodeId) == 0;
+                                   });
+  ASSERT_NE(rootIt, mapInitRsp.map.end());
+
+  auto mapMoveEnv = mapServer->dispatch_request(json(Protocol::MapMoveReq{
+      .type = Protocol::MapRequestType::MAP_MOVE,
+      .uid = uid,
+      .selectId = rootIt->nodeId,
+  }));
+  EXPECT_TRUE(mapMoveEnv.is_null());
+
+  auto badOnMapServer =
+      mapServer->dispatch_request(json::object({{"type", 99}, {"uid", uid}}));
+  EXPECT_EQ(badOnMapServer.get<Protocol::ShortEnvelope>().code,
             (Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST));
 }
 
