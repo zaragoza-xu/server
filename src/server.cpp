@@ -128,8 +128,8 @@ void Server::bind_user_channel(const std::string &uid,
   if (uid.empty() || !channel) {
     return;
   }
-  std::lock_guard<std::mutex> lock(state->userChannelsMutex);
-  state->userChannels[uid] = channel;
+  std::lock_guard<std::mutex> lock(userChannelsMutex);
+  userChannels[uid] = channel;
 }
 
 void Server::broadcast_to_members(const std::vector<std::string> &memberUids,
@@ -139,19 +139,19 @@ void Server::broadcast_to_members(const std::vector<std::string> &memberUids,
   std::vector<std::shared_ptr<Channel>> targets;
 
   {
-    std::lock_guard<std::mutex> lock(state->userChannelsMutex);
+    std::lock_guard<std::mutex> lock(userChannelsMutex);
     targets.reserve(memberUids.size());
     for (const auto &uid : memberUids) {
       if (!excludeUid.empty() && uid == excludeUid) {
         continue;
       }
-      auto it = state->userChannels.find(uid);
-      if (it == state->userChannels.end()) {
+      auto it = userChannels.find(uid);
+      if (it == userChannels.end()) {
         continue;
       }
       auto channel = it->second.lock();
       if (!channel) {
-        state->userChannels.erase(it);
+        userChannels.erase(it);
         continue;
       }
       targets.push_back(std::move(channel));
@@ -473,6 +473,54 @@ int Server::shop_buy_item(const Protocol::ShopBuyItemReq &req,
   return Protocol::SERVICE_SUCCESS;
 }
 
+int Server::map_init(const Protocol::MapInitReq &req,
+                     Protocol::MapInitRsp &rsp) {
+  std::scoped_lock lock(state->usersMutex, state->roomsMutex);
+
+  std::shared_ptr<User> member;
+  std::shared_ptr<Room> room;
+  const int resolve_code = resolve_room_member_locked(req.uid, member, room);
+  if (resolve_code != Protocol::SERVICE_SUCCESS) {
+    return resolve_code;
+  }
+
+  if (!room->get_map_init(rsp)) {
+    return Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR;
+  }
+  return Protocol::SERVICE_SUCCESS;
+}
+
+int Server::map_move(const Protocol::MapMoveReq &req,
+                     Protocol::NoResponseRsp &) {
+  std::vector<std::string> member_uids;
+  std::vector<Protocol::MapSync> selectStatus;
+  bool committed = false;
+  {
+    std::scoped_lock lock(state->usersMutex, state->roomsMutex);
+
+    std::shared_ptr<User> member;
+    std::shared_ptr<Room> room;
+    const int resolve_code = resolve_room_member_locked(req.uid, member, room);
+    if (resolve_code != Protocol::SERVICE_SUCCESS) {
+      return resolve_code;
+    }
+
+    if (!room->move_map(req.uid, req.selectId, selectStatus, committed)) {
+      return Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR;
+    }
+    member_uids = room->get_member_uids();
+  }
+
+  Protocol::LongEnvelope push;
+  push.type = static_cast<int>(Protocol::MapRequestType::MAP_MOVE);
+  push.pushMessages = committed ? std::list<int>{static_cast<int>(
+                                      Protocol::MapResponseType::MAP_SYNC)}
+                                : std::list<int>{};
+  push.data = json{{"selectStatus", selectStatus}};
+  broadcast_to_members(member_uids, push);
+  return Protocol::SERVICE_SUCCESS;
+}
+
 int Server::list_rooms(const Protocol::ListRoomsReq &,
                        Protocol::ListRoomsRsp &rsp) {
   std::lock_guard<std::mutex> lock(state->roomsMutex);
@@ -549,6 +597,32 @@ json ShopServer::dispatch_request(const json &request,
       [type](const CommandDescriptor &entry) { return entry.type == type; });
   if (it == COMMAND_TABLE.end()) {
     logging::log("[dispatch][shop] unknown type={}({})",
+                 logging::request_type_name(type), static_cast<int>(type));
+    return Protocol::ShortEnvelope::make_env(Protocol::SERVICE_FAIL |
+                                             Protocol::BAD_REQUEST);
+  }
+
+  const auto payload = it->dispatch(*this, request);
+  return payload;
+}
+
+json MapServer::dispatch_request(const json &request,
+                                 const std::shared_ptr<Channel> &channel) {
+  if (channel && request.contains("uid") && request.at("uid").is_string()) {
+    bind_user_channel(request.at("uid").get<std::string>(), channel);
+  }
+
+  const auto type = static_cast<Protocol::MapRequestType>(request.value(
+      "type", static_cast<int>(Protocol::MapRequestType::MAP_MOVE) + 100));
+  logging::log("[dispatch][map] type={}({}) request={}",
+               logging::request_type_name(type), static_cast<int>(type),
+               request.dump());
+
+  const auto it = std::find_if(
+      COMMAND_TABLE.begin(), COMMAND_TABLE.end(),
+      [type](const CommandDescriptor &entry) { return entry.type == type; });
+  if (it == COMMAND_TABLE.end()) {
+    logging::log("[dispatch][map] unknown type={}({})",
                  logging::request_type_name(type), static_cast<int>(type));
     return Protocol::ShortEnvelope::make_env(Protocol::SERVICE_FAIL |
                                              Protocol::BAD_REQUEST);

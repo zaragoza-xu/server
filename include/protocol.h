@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <list>
 #include <string>
-#include <string_view>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -14,8 +13,6 @@ using json = nlohmann::json;
 // Protocol definitions using JSON format
 namespace Protocol {
 
-constexpr std::string_view HEADER = "CHAT";
-constexpr int HEADER_SIZE = 4;
 constexpr int MAX_MESSAGE_SIZE = 65536;
 
 enum class LoginRequestType {
@@ -44,6 +41,16 @@ enum class ShopRequestType {
   SHOP_MOVE_CURSOR = 1,
   SHOP_BUY_ITEM = 2,
   ERROR = 100
+};
+
+enum class MapRequestType {
+  MAP_INIT = 0,
+  MAP_MOVE = 1,
+};
+
+enum class MapResponseType {
+  MAP_INIT = 0,
+  MAP_SYNC = 1,
 };
 
 enum Code : int {
@@ -90,7 +97,33 @@ class BattleInfo {
   std::vector<std::string> items;
   // staticAttribute : BattleAttribute;
   // currentAttribute : BattleAttribute;
-  std::string mapNodeId;
+  int mapNodeId = -1;
+};
+
+enum NodeType { NORMAL, ELITE, EVENT, BOSS };
+
+struct MapNode {
+  int nodeId = -1;
+  NodeType type = NodeType::NORMAL;
+  std::vector<int> nextId;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(MapNode, nodeId, type, nextId)
+};
+
+struct MapInitReq {
+  Protocol::MapRequestType type;
+  int roomId = -1;
+  std::string uid;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(MapInitReq, type, roomId, uid)
+};
+
+struct MapMoveReq {
+  Protocol::MapRequestType type;
+  std::string uid;
+  int selectId = -1;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(MapMoveReq, type, uid, selectId)
 };
 
 struct PlayerData {
@@ -337,6 +370,25 @@ struct ShopBuyItemRsp {
   std::string itemId;
 
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(ShopBuyItemRsp, uid, itemId)
+};
+
+struct MapInitRsp {
+  std::vector<MapNode> map;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(MapInitRsp, map)
+};
+
+struct MapSync {
+  std::string uid;
+  int selectId = -1;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(MapSync, uid, selectId)
+};
+
+struct MapSyncRsp {
+  std::vector<MapSync> selectStatus;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(MapSyncRsp, selectStatus)
 };
 
 struct ListRoomsRsp {

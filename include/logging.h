@@ -66,4 +66,14 @@ inline std::string_view request_type_name(Protocol::ShopRequestType type) {
   }
   return "UNKNOWN_SHOP_TYPE";
 }
+
+inline std::string_view request_type_name(Protocol::MapRequestType type) {
+  switch (type) {
+  case Protocol::MapRequestType::MAP_INIT:
+    return "MAP_INIT";
+  case Protocol::MapRequestType::MAP_MOVE:
+    return "MAP_MOVE";
+  }
+  return "UNKNOWN_MAP_TYPE";
+}
 } // namespace logging

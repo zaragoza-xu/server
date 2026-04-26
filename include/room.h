@@ -18,6 +18,7 @@ class Room {
 private:
   std::weak_ptr<ServerState> state;
   int roomId;
+  int mapNodeId = -1;
   size_t maximumPeople;
   std::vector<std::string> uids;
   std::unordered_map<std::string, bool> readyStates;
@@ -26,9 +27,14 @@ private:
   std::unordered_set<std::string> takenItems;
   std::unordered_map<std::string, std::string> selectedItemByUid;
   std::unordered_map<std::string, std::vector<std::string>> ownedItemsByUid;
+  std::vector<Protocol::MapNode> mapNodes;
+  std::unordered_map<std::string, int> selectedMapNodeByUid;
   mutable std::mutex roomMutex;
 
   int get_item_index(const std::string &itemId) const;
+  int get_map_node_index(int nodeId) const;
+  void ensure_map_generated_locked();
+  bool try_commit_map_move_locked();
 
 public:
   Room(int roomId, size_t maximumPeople, std::shared_ptr<ServerState> state,
@@ -49,6 +55,10 @@ public:
   bool move_shop_cursor(const std::string &uid, int direction,
                         std::vector<Protocol::ShopSelectStatus> &selectStatus);
   int buy_shop_item(const std::string &uid, const std::string &itemId);
+  bool get_map_init(Protocol::MapInitRsp &rsp);
+  bool move_map(const std::string &uid, int selectId,
+                std::vector<Protocol::MapSync> &selectStatus,
+                bool &committed);
 
   bool set_member_ready(const std::string &uid, bool ready) {
     std::lock_guard<std::mutex> lock(roomMutex);
@@ -69,6 +79,7 @@ public:
     uids.erase(it);
     readyStates.erase(uid);
     selectedItemByUid.erase(uid);
+    selectedMapNodeByUid.erase(uid);
     ownedItemsByUid.erase(uid);
     return true;
   }

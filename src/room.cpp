@@ -1,10 +1,13 @@
 #include "room.h"
 
 #include <algorithm>
+#include <iterator>
 #include <mutex>
 
 #include "server.h"
 #include "user.h"
+
+std::vector<Protocol::MapNode> generate_map();
 
 int Room::get_item_index(const std::string &itemId) const {
   auto it = std::find(shopItemIds.begin(), shopItemIds.end(), itemId);
@@ -12,6 +15,42 @@ int Room::get_item_index(const std::string &itemId) const {
     return -1;
   }
   return static_cast<int>(std::distance(shopItemIds.begin(), it));
+}
+
+int Room::get_map_node_index(int nodeId) const {
+  auto it = std::find_if(mapNodes.begin(), mapNodes.end(),
+                         [nodeId](const Protocol::MapNode &node) {
+                           return node.nodeId == nodeId;
+                         });
+  if (it == mapNodes.end()) {
+    return -1;
+  }
+  return static_cast<int>(std::distance(mapNodes.begin(), it));
+}
+
+void Room::ensure_map_generated_locked() {
+  if (!mapNodes.empty()) {
+    return;
+  }
+  mapNodes = generate_map();
+}
+
+bool Room::try_commit_map_move_locked() {
+  if (uids.empty() || selectedMapNodeByUid.size() != uids.size()) {
+    return false;
+  }
+
+  const int target = selectedMapNodeByUid.begin()->second;
+  for (const auto &uid : uids) {
+    auto it = selectedMapNodeByUid.find(uid);
+    if (it == selectedMapNodeByUid.end() || it->second != target) {
+      return false;
+    }
+  }
+
+  mapNodeId = target;
+  selectedMapNodeByUid.clear();
+  return true;
 }
 
 Room::Room(int roomId, size_t maximumPeople, std::shared_ptr<ServerState> state,
@@ -170,4 +209,66 @@ int Room::buy_shop_item(const std::string &uid, const std::string &itemId) {
   }
 
   return Protocol::SERVICE_SUCCESS;
+}
+
+bool Room::get_map_init(Protocol::MapInitRsp &rsp) {
+  std::lock_guard<std::mutex> lock(roomMutex);
+  ensure_map_generated_locked();
+  rsp.map = mapNodes;
+  return !rsp.map.empty();
+}
+
+bool Room::move_map(const std::string &uid, int selectId,
+                    std::vector<Protocol::MapSync> &selectStatus,
+                    bool &committed) {
+  std::lock_guard<std::mutex> lock(roomMutex);
+  ensure_map_generated_locked();
+  committed = false;
+
+  if (get_map_node_index(selectId) < 0) {
+    return false;
+  }
+
+  if (mapNodeId >= 0) {
+    const int current_index = get_map_node_index(mapNodeId);
+    if (current_index < 0) {
+      return false;
+    }
+
+    const auto &next_ids = mapNodes[static_cast<size_t>(current_index)].nextId;
+    if (std::find(next_ids.begin(), next_ids.end(), selectId) ==
+        next_ids.end()) {
+      return false;
+    }
+  } else {
+    // First committed move must start from a root node (node without incoming
+    // edges).
+    const bool has_incoming =
+        std::any_of(mapNodes.begin(), mapNodes.end(),
+                    [selectId](const Protocol::MapNode &node) {
+                      return std::find(node.nextId.begin(), node.nextId.end(),
+                                       selectId) != node.nextId.end();
+                    });
+    if (has_incoming) {
+      return false;
+    }
+  }
+
+  selectedMapNodeByUid[uid] = selectId;
+
+  selectStatus.clear();
+  selectStatus.reserve(uids.size());
+  for (const auto &member_uid : uids) {
+    Protocol::MapSync status;
+    status.uid = member_uid;
+
+    auto selected_it = selectedMapNodeByUid.find(member_uid);
+    if (selected_it != selectedMapNodeByUid.end()) {
+      status.selectId = selected_it->second;
+    }
+    selectStatus.push_back(std::move(status));
+  }
+
+  committed = try_commit_map_move_locked();
+  return true;
 }

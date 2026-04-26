@@ -24,15 +24,11 @@ struct ServerState {
   std::unordered_map<std::string, std::shared_ptr<User>> users;
   // room_id -> Room
   std::unordered_map<int, std::shared_ptr<Room>> rooms;
-  // uid -> active channel for server push messages across services (weak to
-  // avoid ownership cycle)
-  std::unordered_map<std::string, std::weak_ptr<Channel>> userChannels;
   std::vector<std::string> shopCatalogItemIds;
   std::string shopCatalogVersion = "v1";
   std::mutex usersMutex;
   std::mutex roomsMutex;
   std::mutex userDataMutex;
-  std::mutex userChannelsMutex;
   int nextRoomId = 1;
   int nextUid = 1;
 };
@@ -115,6 +111,8 @@ public:
                        Protocol::NoResponseRsp &);
   int shop_buy_item(const Protocol::ShopBuyItemReq &,
                     Protocol::NoResponseRsp &);
+  int map_init(const Protocol::MapInitReq &, Protocol::MapInitRsp &);
+  int map_move(const Protocol::MapMoveReq &, Protocol::NoResponseRsp &);
   int list_rooms(const Protocol::ListRoomsReq &, Protocol::ListRoomsRsp &);
   int logout_user(const Protocol::LogoutReq &, Protocol::EmptyRsp &);
 
@@ -123,6 +121,11 @@ public:
   bool user_exists(const std::string &uid) const;
 
 protected:
+  // uid -> active channel for server push (per-server-instance, weak to avoid
+  // ownership cycle)
+  std::unordered_map<std::string, std::weak_ptr<Channel>> userChannels;
+  std::mutex userChannelsMutex;
+
   void bind_user_channel(const std::string &uid,
                          const std::shared_ptr<Channel> &channel);
   void broadcast_to_members(const std::vector<std::string> &memberUids,
@@ -227,5 +230,30 @@ private:
        &Server::dispatch_entry_long<Protocol::ShopBuyItemReq,
                                     Protocol::NoResponseRsp,
                                     &Server::shop_buy_item>},
+  }};
+};
+
+// map server spec
+class MapServer : public Server {
+public:
+  MapServer(asio::io_context &context, int port,
+            std::shared_ptr<ServerState> sharedState = nullptr)
+      : Server(context, port, std::move(sharedState)) {}
+  json
+  dispatch_request(const json &request,
+                   const std::shared_ptr<Channel> &channel = nullptr) override;
+
+private:
+  struct CommandDescriptor {
+    Protocol::MapRequestType type;
+    DispatchFn dispatch;
+  };
+  const std::array<MapServer::CommandDescriptor, 2> COMMAND_TABLE{{
+      {Protocol::MapRequestType::MAP_INIT,
+       &Server::dispatch_entry_long<Protocol::MapInitReq, Protocol::MapInitRsp,
+                                    &Server::map_init>},
+      {Protocol::MapRequestType::MAP_MOVE,
+       &Server::dispatch_entry_long<
+           Protocol::MapMoveReq, Protocol::NoResponseRsp, &Server::map_move>},
   }};
 };
