@@ -19,6 +19,7 @@ struct RuntimeConfig {
   int authPort = 0;
   int lobbyPort = 0;
   int shopPort = 0;
+  int mapPort = 0;
 };
 
 std::string resolve_config_path(int argc, char **argv) {
@@ -66,20 +67,21 @@ bool load_config(const std::string &path, RuntimeConfig &cfg) {
   cfg.authPort = j.value("authPort", 0);
   cfg.lobbyPort = j.value("lobbyPort", 0);
   cfg.shopPort = j.value("shopPort", 0);
+  cfg.mapPort = j.value("mapPort", 0);
   return true;
 }
 
 bool validate_config(const RuntimeConfig &cfg) {
   if (!is_valid_port(cfg.authPort) || !is_valid_port(cfg.lobbyPort) ||
-      !is_valid_port(cfg.shopPort)) {
+      !is_valid_port(cfg.shopPort) || !is_valid_port(cfg.mapPort)) {
     logging::log("All ports must be in range 1-65535 (auth={}, lobby={}, "
-                 "shop={})",
-                 cfg.authPort, cfg.lobbyPort, cfg.shopPort);
+                 "shop={}, map={})",
+                 cfg.authPort, cfg.lobbyPort, cfg.shopPort, cfg.mapPort);
     return false;
   }
-  std::set<int> ports{cfg.authPort, cfg.lobbyPort, cfg.shopPort};
-  if (ports.size() != 3) {
-    logging::log("All three ports must be different");
+  std::set<int> ports{cfg.authPort, cfg.lobbyPort, cfg.shopPort, cfg.mapPort};
+  if (ports.size() != 4) {
+    logging::log("All four ports must be different");
     return false;
   }
   return true;
@@ -105,11 +107,14 @@ int main(int argc, char **argv) {
         std::make_shared<HomeServer>(io_context, cfg.lobbyPort, sharedState);
     auto shopServer =
         std::make_shared<ShopServer>(io_context, cfg.shopPort, sharedState);
+    auto mapServer =
+        std::make_shared<MapServer>(io_context, cfg.mapPort, sharedState);
 
     logging::log("Config loaded from: {}", configPath);
     logging::log("Auth service listening on port {}", cfg.authPort);
     logging::log("Lobby service listening on port {}", cfg.lobbyPort);
     logging::log("Shop service listening on port {}", cfg.shopPort);
+    logging::log("Map service listening on port {}", cfg.mapPort);
 
     io_context.run();
 
