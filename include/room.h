@@ -35,6 +35,7 @@ private:
   int get_map_node_index(int nodeId) const;
   void ensure_map_generated_locked();
   bool try_commit_map_move_locked();
+  std::vector<Protocol::ShopItem> build_shop_items_locked() const;
 
 public:
   Room(int roomId, size_t maximumPeople, std::shared_ptr<ServerState> state,
@@ -52,13 +53,13 @@ public:
   bool add_member(std::shared_ptr<User> user);
 
   bool get_shop_init(Protocol::ShopInitRsp &rsp) const;
-  bool move_shop_cursor(const std::string &uid, int direction,
-                        std::vector<Protocol::ShopSelectStatus> &selectStatus);
-  int buy_shop_item(const std::string &uid, const std::string &itemId);
+  bool move_shop_cursor(const std::string &uid, const std::string &itemId,
+                        std::vector<Protocol::ShopItem> &items);
+  int buy_shop_item(const std::string &uid, const std::string &itemId,
+                    std::vector<Protocol::ShopItem> &items);
   bool get_map_init(Protocol::MapInitRsp &rsp);
   bool move_map(const std::string &uid, int selectId,
-                std::vector<Protocol::MapSync> &selectStatus,
-                bool &committed);
+                std::vector<Protocol::MapSync> &selectStatus, bool &committed);
 
   bool set_member_ready(const std::string &uid, bool ready) {
     std::lock_guard<std::mutex> lock(roomMutex);

@@ -226,7 +226,7 @@ private:
        &Server::dispatch_entry_long<Protocol::ShopMoveCursorReq,
                                     Protocol::NoResponseRsp,
                                     &Server::shop_move_cursor>},
-      {Protocol::ShopRequestType::SHOP_BUY_ITEM,
+      {Protocol::ShopRequestType::SHOP_BUY,
        &Server::dispatch_entry_long<Protocol::ShopBuyItemReq,
                                     Protocol::NoResponseRsp,
                                     &Server::shop_buy_item>},

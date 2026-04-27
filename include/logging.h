@@ -59,12 +59,20 @@ inline std::string_view request_type_name(Protocol::ShopRequestType type) {
     return "SHOP_INIT";
   case Protocol::ShopRequestType::SHOP_MOVE_CURSOR:
     return "SHOP_MOVE_CURSOR";
-  case Protocol::ShopRequestType::SHOP_BUY_ITEM:
-    return "SHOP_BUY_ITEM";
+  case Protocol::ShopRequestType::SHOP_BUY:
+    return "SHOP_BUY";
   case Protocol::ShopRequestType::ERROR:
     return "ERROR";
   }
   return "UNKNOWN_SHOP_TYPE";
+}
+
+inline std::string_view request_type_name(Protocol::ShopResponseType type) {
+  switch (type) {
+  case Protocol::ShopResponseType::SHOP_SYNC:
+    return "SHOP_SYNC";
+  }
+  return "UNKNOWN_SHOP_RESPONSE_TYPE";
 }
 
 inline std::string_view request_type_name(Protocol::MapRequestType type) {
