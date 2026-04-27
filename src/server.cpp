@@ -414,12 +414,8 @@ int Server::shop_init(const Protocol::ShopInitReq &req,
 
 int Server::shop_move_cursor(const Protocol::ShopMoveCursorReq &req,
                              Protocol::NoResponseRsp &) {
-  if (req.direction != 0 && req.direction != 1) {
-    return Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST;
-  }
-
   std::vector<std::string> member_uids;
-  std::vector<Protocol::ShopSelectStatus> selectStatus;
+  std::vector<Protocol::ShopItem> items;
   {
     std::scoped_lock lock(state->usersMutex, state->roomsMutex);
 
@@ -430,16 +426,16 @@ int Server::shop_move_cursor(const Protocol::ShopMoveCursorReq &req,
       return resolve_code;
     }
 
-    if (!room->move_shop_cursor(req.uid, req.direction, selectStatus)) {
-      return Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR;
+    if (!room->move_shop_cursor(req.uid, req.itemId, items)) {
+      return Protocol::SERVICE_FAIL | Protocol::SHOP_INVALID_ITEM;
     }
     member_uids = room->get_member_uids();
   }
 
   Protocol::LongEnvelope push;
-  push.type = static_cast<int>(Protocol::ShopRequestType::SHOP_MOVE_CURSOR);
+  push.type = static_cast<int>(Protocol::ShopResponseType::SHOP_SYNC);
   push.pushMessages = {};
-  push.data = json{{"selectStatus", selectStatus}};
+  push.data = json{{"items", items}};
   broadcast_to_members(member_uids, push);
   return Protocol::SERVICE_SUCCESS;
 }
@@ -447,6 +443,7 @@ int Server::shop_move_cursor(const Protocol::ShopMoveCursorReq &req,
 int Server::shop_buy_item(const Protocol::ShopBuyItemReq &req,
                           Protocol::NoResponseRsp &) {
   std::vector<std::string> member_uids;
+  std::vector<Protocol::ShopItem> items;
   {
     std::scoped_lock lock(state->usersMutex, state->roomsMutex);
 
@@ -457,7 +454,7 @@ int Server::shop_buy_item(const Protocol::ShopBuyItemReq &req,
       return resolve_code;
     }
 
-    const int buy_code = room->buy_shop_item(req.uid, req.itemId);
+    const int buy_code = room->buy_shop_item(req.uid, req.itemId, items);
     if (buy_code != Protocol::SERVICE_SUCCESS) {
       return buy_code;
     }
@@ -466,9 +463,9 @@ int Server::shop_buy_item(const Protocol::ShopBuyItemReq &req,
   }
 
   Protocol::LongEnvelope push;
-  push.type = static_cast<int>(Protocol::ShopRequestType::SHOP_BUY_ITEM);
+  push.type = static_cast<int>(Protocol::ShopResponseType::SHOP_SYNC);
   push.pushMessages = {};
-  push.data = json{{"uid", req.uid}, {"itemId", req.itemId}};
+  push.data = json{{"items", items}};
   broadcast_to_members(member_uids, push);
   return Protocol::SERVICE_SUCCESS;
 }

@@ -39,8 +39,12 @@ enum class HomeRequestType {
 enum class ShopRequestType {
   SHOP_INIT = 0,
   SHOP_MOVE_CURSOR = 1,
-  SHOP_BUY_ITEM = 2,
+  SHOP_BUY = 2,
   ERROR = 100
+};
+
+enum class ShopResponseType {
+  SHOP_SYNC = 0,
 };
 
 enum class MapRequestType {
@@ -90,6 +94,17 @@ struct RoomInfo {
 
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(RoomInfo, roomId, maximumPeople,
                                               basicInfos, readyUids)
+};
+
+struct ShopItem {
+  enum class Status { UNDO = 0, SELECT = 1, BUY = 2 };
+
+  std::string itemId;
+  Status itemStatus = Status::UNDO;
+  std::string selectUid; // valid if itemStatus is SELECT
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(ShopItem, itemId, itemStatus,
+                                              selectUid);
 };
 
 class BattleInfo {
@@ -287,10 +302,10 @@ struct ShopInitReq {
 struct ShopMoveCursorReq {
   Protocol::ShopRequestType type;
   std::string uid;
-  int direction = 0; // 0 - up, 1 - down
+  std::string itemId;
 
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(ShopMoveCursorReq, type, uid,
-                                              direction)
+                                              itemId)
 };
 
 struct ShopBuyItemReq {
@@ -345,31 +360,10 @@ struct ShopPlayerInfo {
 };
 
 struct ShopInitRsp {
-  std::vector<std::string> itemIds;
+  std::vector<ShopItem> items;
   std::vector<ShopPlayerInfo> playerInfos;
 
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(ShopInitRsp, itemIds, playerInfos)
-};
-
-struct ShopSelectStatus {
-  std::string uid;
-  std::string selectItemId;
-
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(ShopSelectStatus, uid,
-                                              selectItemId)
-};
-
-struct ShopMoveCursorRsp {
-  std::vector<ShopSelectStatus> selectStatus;
-
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(ShopMoveCursorRsp, selectStatus)
-};
-
-struct ShopBuyItemRsp {
-  std::string uid;
-  std::string itemId;
-
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(ShopBuyItemRsp, uid, itemId)
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(ShopInitRsp, items, playerInfos)
 };
 
 struct MapInitRsp {
