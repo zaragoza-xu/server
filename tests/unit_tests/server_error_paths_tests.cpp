@@ -143,7 +143,7 @@ TEST(ServerBehaviorTest, ErrorPathsCoverage) {
                 Protocol::ShopMoveCursorReq{
                     .type = Protocol::ShopRequestType::SHOP_MOVE_CURSOR,
                     .uid = uid1,
-                    .direction = 2,
+                    .itemId = "1",
                 },
                 shopMoveRsp),
             (Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST));

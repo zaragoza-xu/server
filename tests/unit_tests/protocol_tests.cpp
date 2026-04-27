@@ -34,7 +34,7 @@ TEST(ProtocolTest, CommandTypeMapping) {
   using Protocol::ShopRequestType;
   EXPECT_EQ(static_cast<int>(ShopRequestType::SHOP_INIT), 0);
   EXPECT_EQ(static_cast<int>(ShopRequestType::SHOP_MOVE_CURSOR), 1);
-  EXPECT_EQ(static_cast<int>(ShopRequestType::SHOP_BUY_ITEM), 2);
+  EXPECT_EQ(static_cast<int>(ShopRequestType::SHOP_BUY), 2);
   EXPECT_EQ(static_cast<int>(ShopRequestType::ERROR), 100);
 }
 

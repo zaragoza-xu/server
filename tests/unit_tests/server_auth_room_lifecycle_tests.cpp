@@ -247,7 +247,7 @@ TEST_F(ServerChannelBehaviorTest, ShopFlowBehavior) {
                                 .uid = aliceUid},
           initRsp),
       Protocol::SERVICE_SUCCESS);
-  EXPECT_FALSE(initRsp.itemIds.empty());
+  EXPECT_FALSE(initRsp.items.empty());
   EXPECT_EQ(initRsp.playerInfos.size(), 2U);
 
   Protocol::NoResponseRsp moveRsp;
@@ -255,7 +255,7 @@ TEST_F(ServerChannelBehaviorTest, ShopFlowBehavior) {
                 Protocol::ShopMoveCursorReq{
                     .type = Protocol::ShopRequestType::SHOP_MOVE_CURSOR,
                     .uid = aliceUid,
-                    .direction = 1,
+                    .itemId = "1",
                 },
                 moveRsp),
             Protocol::SERVICE_SUCCESS);
@@ -268,35 +268,35 @@ TEST_F(ServerChannelBehaviorTest, ShopFlowBehavior) {
                                 .uid = aliceUid},
           afterMoveRsp),
       Protocol::SERVICE_SUCCESS);
-  ASSERT_GT(afterMoveRsp.itemIds.size(), 1U);
+  ASSERT_GT(afterMoveRsp.items.size(), 1U);
   // Use second item (direction=1 moves from index 0 to index 1)
-  const std::string selectedItemId = afterMoveRsp.itemIds.at(1);
+  const std::string selectedItemId = afterMoveRsp.items.at(1).itemId;
   ASSERT_FALSE(selectedItemId.empty());
 
   Protocol::NoResponseRsp buyRsp;
-  ASSERT_EQ(server->shop_buy_item(
-                Protocol::ShopBuyItemReq{
-                    .type = Protocol::ShopRequestType::SHOP_BUY_ITEM,
-                    .uid = aliceUid,
-                    .itemId = selectedItemId},
-                buyRsp),
-            Protocol::SERVICE_SUCCESS);
+  ASSERT_EQ(
+      server->shop_buy_item(
+          Protocol::ShopBuyItemReq{.type = Protocol::ShopRequestType::SHOP_BUY,
+                                   .uid = aliceUid,
+                                   .itemId = selectedItemId},
+          buyRsp),
+      Protocol::SERVICE_SUCCESS);
 
-  EXPECT_EQ(server->shop_buy_item(
-                Protocol::ShopBuyItemReq{
-                    .type = Protocol::ShopRequestType::SHOP_BUY_ITEM,
-                    .uid = bobUid,
-                    .itemId = selectedItemId},
-                buyRsp),
-            (Protocol::SERVICE_FAIL | Protocol::SHOP_ITEM_TAKEN));
+  EXPECT_EQ(
+      server->shop_buy_item(
+          Protocol::ShopBuyItemReq{.type = Protocol::ShopRequestType::SHOP_BUY,
+                                   .uid = bobUid,
+                                   .itemId = selectedItemId},
+          buyRsp),
+      (Protocol::SERVICE_FAIL | Protocol::SHOP_ITEM_TAKEN));
 
-  EXPECT_EQ(server->shop_buy_item(
-                Protocol::ShopBuyItemReq{
-                    .type = Protocol::ShopRequestType::SHOP_BUY_ITEM,
-                    .uid = bobUid,
-                    .itemId = "unknown-item"},
-                buyRsp),
-            (Protocol::SERVICE_FAIL | Protocol::SHOP_INVALID_ITEM));
+  EXPECT_EQ(
+      server->shop_buy_item(
+          Protocol::ShopBuyItemReq{.type = Protocol::ShopRequestType::SHOP_BUY,
+                                   .uid = bobUid,
+                                   .itemId = "unknown-item"},
+          buyRsp),
+      (Protocol::SERVICE_FAIL | Protocol::SHOP_INVALID_ITEM));
 }
 
 } // namespace

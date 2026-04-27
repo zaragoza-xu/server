@@ -129,7 +129,7 @@ TEST(ServerDispatchTest, ShopServerDispatchRouting) {
       shopServer->dispatch_request(json(Protocol::ShopMoveCursorReq{
           .type = Protocol::ShopRequestType::SHOP_MOVE_CURSOR,
           .uid = uid,
-          .direction = 1,
+          .itemId = "1",
       }));
   EXPECT_TRUE(shopMoveEnv.is_null());
 

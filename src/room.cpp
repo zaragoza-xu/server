@@ -180,7 +180,9 @@ bool Room::move_shop_cursor(const std::string &uid, const std::string &itemId,
                             std::vector<Protocol::ShopItem> &items) {
   std::lock_guard<std::mutex> lock(roomMutex);
   if (get_item_index(itemId) < 0) {
-    return false;
+    selectedItemByUid.erase(uid);
+    items = build_shop_items_locked();
+    return true; // Invalid itemId is treated as deselection, not an error
   }
   selectedItemByUid[uid] = itemId;
   items = build_shop_items_locked();

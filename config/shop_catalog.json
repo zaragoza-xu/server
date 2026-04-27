@@ -1,10 +1,9 @@
 {
   "version": "shop-v1",
   "itemIds": [
-    "sword",
-    "shield",
-    "potion",
-    "boots",
-    "wand"
+    "1",
+    "2",
+    "3",
+    "4"
   ]
 }
