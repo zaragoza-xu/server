@@ -146,14 +146,14 @@ struct SetReadyReq {
 };
 
 struct ShopInitReq {
-  Protocol::ShopResponseType type;
+  Protocol::ShopRequestType type;
   std::string uid;
 
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(ShopInitReq, type, uid)
 };
 
 struct ShopMoveCursorReq {
-  Protocol::ShopResponseType type;
+  Protocol::ShopRequestType type;
   std::string uid;
   std::string itemId;
 
@@ -162,7 +162,7 @@ struct ShopMoveCursorReq {
 };
 
 struct ShopBuyItemReq {
-  Protocol::ShopResponseType type;
+  Protocol::ShopRequestType type;
   std::string uid;
   std::string itemId;
 

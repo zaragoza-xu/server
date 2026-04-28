@@ -142,11 +142,11 @@ TEST(ServerBehaviorTest, ErrorPathsCoverage) {
   EXPECT_EQ(server->shop_move_cursor(
                 Protocol::ShopMoveCursorReq{
                     .type = Protocol::ShopRequestType::SHOP_MOVE_CURSOR,
-                    .uid = uid1,
-                    .itemId = "1",
+                    .uid = uid2,
+                    .itemId = "not-an-item",
                 },
                 shopMoveRsp),
-            (Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST));
+            (Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR));
 
   Protocol::EditProfileReq editReq{
       .type = Protocol::HomeRequestType::EDIT_PROFILE,

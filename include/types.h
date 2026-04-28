@@ -33,11 +33,17 @@ enum class HomeRequestType {
   ERROR = 100
 };
 
-enum class ShopResponseType {
+enum class HomePushMessageType { ALL_READY = 0, ERROR = 100 };
+
+enum class ShopRequestType {
   SHOP_INIT = 0,
   SHOP_MOVE_CURSOR = 1,
-  SHOP_BUY_ITEM = 2,
+  SHOP_BUY = 2,
   ERROR = 100
+};
+
+enum class ShopResponseType {
+  SHOP_SYNC = 0,
 };
 
 enum class MapRequestType {
@@ -96,9 +102,22 @@ struct RoomInfo {
                                               basicInfos, readyUids)
 };
 
-enum NodeType { NORMAL, ELITE, EVENT, BOSS };
+struct ShopItem {
+  enum class Status {
+    UNDO = 0,
+    SELECT = 1,
+    BUY = 2,
+  };
+  std::string itemId;
+  Status itemStatus = Status::UNDO;
+  std::string selectUid;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(ShopItem, itemId, itemStatus,
+                                              selectUid)
+};
 
 struct MapNode {
+  enum class NodeType { NORMAL, ELITE, EVENT, BOSS };
   int nodeId = -1;
   NodeType type = NodeType::NORMAL;
   std::vector<int> nextId;

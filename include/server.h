@@ -7,10 +7,13 @@
 #include <unordered_map>
 
 #include <asio/awaitable.hpp>
+#include <asio/co_spawn.hpp>
+#include <asio/detached.hpp>
 #include <asio/io_context.hpp>
 #include <asio/ip/tcp.hpp>
 #include <asio/steady_timer.hpp>
 
+#include "battle.h"
 #include "protocol.h"
 
 class Channel;
@@ -39,6 +42,7 @@ private:
   asio::ip::tcp::acceptor acceptor;
   asio::io_context &ioContext;
   std::shared_ptr<ServerState> state;
+  std::once_flag startOnce;
 
   asio::awaitable<void> accept_loop();
 
@@ -52,6 +56,7 @@ public:
   Server(asio::io_context &context, int port,
          std::shared_ptr<ServerState> sharedState = nullptr);
   virtual ~Server() = default;
+  virtual void start();
 
   using DispatchFn = json (*)(Server &, const json &);
 
@@ -113,6 +118,12 @@ public:
                     Protocol::NoResponseRsp &);
   int map_init(const Protocol::MapInitReq &, Protocol::MapInitRsp &);
   int map_move(const Protocol::MapMoveReq &, Protocol::NoResponseRsp &);
+  int battle_player_ready(const Protocol::BattlePlayerReadyReq &,
+                          Protocol::NoResponseRsp &);
+  int battle_player_move(const Protocol::BattlePlayerMoveReq &,
+                         Protocol::NoResponseRsp &);
+  int battle_player_shoot(const Protocol::BattlePlayerShootReq &,
+                          Protocol::NoResponseRsp &);
   int list_rooms(const Protocol::ListRoomsReq &, Protocol::ListRoomsRsp &);
   int logout_user(const Protocol::LogoutReq &, Protocol::EmptyRsp &);
 
@@ -121,6 +132,8 @@ public:
   bool user_exists(const std::string &uid) const;
 
 protected:
+  std::shared_ptr<ServerState> get_shared_state() const { return state; }
+
   // uid -> active channel for server push (per-server-instance, weak to avoid
   // ownership cycle)
   std::unordered_map<std::string, std::weak_ptr<Channel>> userChannels;
@@ -215,14 +228,14 @@ public:
 
 private:
   struct CommandDescriptor {
-    Protocol::ShopResponseType type;
+    Protocol::ShopRequestType type;
     DispatchFn dispatch;
   };
   const std::array<ShopServer::CommandDescriptor, 3> COMMAND_TABLE{{
-      {Protocol::ShopResponseType::SHOP_INIT,
+      {Protocol::ShopRequestType::SHOP_INIT,
        &Server::dispatch_entry_long<Protocol::ShopInitReq,
                                     Protocol::ShopInitRsp, &Server::shop_init>},
-      {Protocol::ShopResponseType::SHOP_MOVE_CURSOR,
+      {Protocol::ShopRequestType::SHOP_MOVE_CURSOR,
        &Server::dispatch_entry_long<Protocol::ShopMoveCursorReq,
                                     Protocol::NoResponseRsp,
                                     &Server::shop_move_cursor>},
@@ -255,5 +268,41 @@ private:
       {Protocol::MapRequestType::MAP_MOVE,
        &Server::dispatch_entry_long<
            Protocol::MapMoveReq, Protocol::NoResponseRsp, &Server::map_move>},
+  }};
+};
+
+class BattleServer : public Server {
+public:
+  BattleServer(asio::io_context &context, int port,
+               std::shared_ptr<ServerState> sharedState = nullptr)
+      : Server(context, port, std::move(sharedState)), tickTimer(context) {}
+  void start() override;
+  json
+  dispatch_request(const json &request,
+                   const std::shared_ptr<Channel> &channel = nullptr) override;
+
+private:
+  asio::steady_timer tickTimer;
+  std::once_flag tickStartOnce;
+
+  asio::awaitable<void> tick_loop();
+
+  struct CommandDescriptor {
+    Protocol::BattleRequestType type;
+    DispatchFn dispatch;
+  };
+  const std::array<BattleServer::CommandDescriptor, 3> COMMAND_TABLE{{
+      {Protocol::BattleRequestType::PLAYER_READY,
+       &Server::dispatch_entry_long<Protocol::BattlePlayerReadyReq,
+                                    Protocol::NoResponseRsp,
+                                    &Server::battle_player_ready>},
+      {Protocol::BattleRequestType::PLAYER_MOVE,
+       &Server::dispatch_entry_long<Protocol::BattlePlayerMoveReq,
+                                    Protocol::NoResponseRsp,
+                                    &Server::battle_player_move>},
+      {Protocol::BattleRequestType::PLAYER_SHOOT,
+       &Server::dispatch_entry_long<Protocol::BattlePlayerShootReq,
+                                    Protocol::NoResponseRsp,
+                                    &Server::battle_player_shoot>},
   }};
 };

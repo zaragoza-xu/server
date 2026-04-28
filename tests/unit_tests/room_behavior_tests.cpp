@@ -93,4 +93,39 @@ TEST(RoomTest, GetInfoSkipsMissingProfiles) {
   EXPECT_EQ(roomInfo.basicInfos.front().uid, creatorInfo.uid);
 }
 
+TEST(RoomTest, ShopItemCountTracksCurrentMemberCount) {
+  auto state = std::make_shared<ServerState>();
+  state->shopCatalogItemIds = {"sword", "shield", "potion", "boots"};
+  state->shopCatalogVersion = "test-v1";
+
+  Protocol::PlayerBasicInfo creatorInfo{"1", "creator", 1};
+  Protocol::PlayerBasicInfo info2{"2", "u2", 2};
+  state->userData.emplace(creatorInfo.uid,
+                          Protocol::PlayerData{.basicInfo = creatorInfo});
+  state->userData.emplace(info2.uid, Protocol::PlayerData{.basicInfo = info2});
+
+  auto creator = std::make_shared<User>(creatorInfo.uid, state);
+  auto user2 = std::make_shared<User>(info2.uid, state);
+  Room room(88, 3, state, creator);
+
+  Protocol::ShopInitRsp initRsp;
+  ASSERT_TRUE(room.get_shop_init(initRsp));
+  EXPECT_EQ(initRsp.items.size(), 1U);
+  EXPECT_EQ(initRsp.playerInfos.size(), 1U);
+
+  ASSERT_TRUE(room.add_member(user2));
+
+  Protocol::ShopInitRsp afterJoinRsp;
+  ASSERT_TRUE(room.get_shop_init(afterJoinRsp));
+  EXPECT_EQ(afterJoinRsp.items.size(), 2U);
+  EXPECT_EQ(afterJoinRsp.playerInfos.size(), 2U);
+
+  ASSERT_TRUE(room.remove_member(info2.uid));
+
+  Protocol::ShopInitRsp afterLeaveRsp;
+  ASSERT_TRUE(room.get_shop_init(afterLeaveRsp));
+  EXPECT_EQ(afterLeaveRsp.items.size(), 1U);
+  EXPECT_EQ(afterLeaveRsp.playerInfos.size(), 1U);
+}
+
 } // namespace

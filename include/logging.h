@@ -2,6 +2,7 @@
 #include <format>
 #include <iostream>
 
+#include "battle.h"
 #include "types.h"
 
 namespace logging {
@@ -53,11 +54,11 @@ inline std::string_view request_type_name(Protocol::HomeRequestType type) {
   return "UNKNOWN_HOME_TYPE";
 }
 
-inline std::string_view request_type_name(Protocol::ShopResponseType type) {
+inline std::string_view request_type_name(Protocol::ShopRequestType type) {
   switch (type) {
-  case Protocol::ShopResponseType::SHOP_INIT:
+  case Protocol::ShopRequestType::SHOP_INIT:
     return "SHOP_INIT";
-  case Protocol::ShopResponseType::SHOP_MOVE_CURSOR:
+  case Protocol::ShopRequestType::SHOP_MOVE_CURSOR:
     return "SHOP_MOVE_CURSOR";
   case Protocol::ShopRequestType::SHOP_BUY:
     return "SHOP_BUY";
@@ -83,5 +84,31 @@ inline std::string_view request_type_name(Protocol::MapRequestType type) {
     return "MAP_MOVE";
   }
   return "UNKNOWN_MAP_TYPE";
+}
+
+inline std::string_view request_type_name(Protocol::BattleRequestType type) {
+  switch (type) {
+  case Protocol::BattleRequestType::PLAYER_READY:
+    return "PLAYER_READY";
+  case Protocol::BattleRequestType::PLAYER_MOVE:
+    return "PLAYER_MOVE";
+  case Protocol::BattleRequestType::PLAYER_SHOOT:
+    return "PLAYER_SHOOT";
+  case Protocol::BattleRequestType::ERROR:
+    return "ERROR";
+  }
+  return "UNKNOWN_BATTLE_TYPE";
+}
+
+inline std::string_view request_type_name(Protocol::BattleResponseType type) {
+  switch (type) {
+  case Protocol::BattleResponseType::BATTLE_WAIT:
+    return "BATTLE_WAIT";
+  case Protocol::BattleResponseType::BATTLE_FRAME:
+    return "BATTLE_FRAME";
+  case Protocol::BattleResponseType::ERROR:
+    return "ERROR";
+  }
+  return "UNKNOWN_BATTLE_RESPONSE_TYPE";
 }
 } // namespace logging

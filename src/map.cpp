@@ -24,31 +24,43 @@ int random_range(int min, int max_inclusive) {
   return dist(rng);
 }
 
-NodeType get_random_type(int col, int totalCol) {
+MapNode::NodeType get_random_type(int col, int totalCol) {
   float p = (float)col / totalCol;
   int r = random_range(0, 9);
   if (p < 0.3f)
-    return r < 8 ? NodeType::NORMAL : NodeType::EVENT;
+    return r < 8 ? MapNode::NodeType::NORMAL : MapNode::NodeType::EVENT;
   if (p < 0.7f)
-    return r < 5 ? NodeType::NORMAL : r < 8 ? NodeType::ELITE : NodeType::EVENT;
-  return r < 4 ? NodeType::NORMAL : r < 8 ? NodeType::ELITE : NodeType::EVENT;
+    return r < 5   ? MapNode::NodeType::NORMAL
+           : r < 8 ? MapNode::NodeType::ELITE
+                   : MapNode::NodeType::EVENT;
+  return r < 4   ? MapNode::NodeType::NORMAL
+         : r < 8 ? MapNode::NodeType::ELITE
+                 : MapNode::NodeType::EVENT;
 }
 
 std::vector<std::pair<int, int>> get_random_valid_path_fast(int outputCount,
                                                             int inputCount) {
   std::vector<std::pair<int, int>> result;
+  if (outputCount <= 0 || inputCount <= 0) {
+    return result;
+  }
+
   result.reserve(outputCount);
-
+  int lastEnd = 0;
   for (int i = 0; i < outputCount; i++) {
-    const int base = (i * inputCount) / outputCount;
-    int start = std::clamp(base, 0, inputCount - 1);
-    int end = start;
-
-    if (inputCount > 1 && start + 1 < inputCount && random_range(0, 1) == 1) {
-      end = start + 1;
+    int start = 0;
+    if (i > 0) {
+      const int minStart = lastEnd;
+      const int maxStart = std::min(lastEnd + 1, inputCount - 1);
+      start = random_range(minStart, maxStart);
     }
 
-    result.push_back({start, end});
+    const bool isLastOutput = i == outputCount - 1;
+    const int end =
+        isLastOutput ? inputCount - 1 : random_range(start, inputCount - 1);
+
+    result.push_back(std::make_pair(start, end));
+    lastEnd = end;
   }
 
   return result;
@@ -78,8 +90,16 @@ std::vector<MapNode> generate_map() {
   TowerMap map;
   int nextNodeId = 0;
 
-  int columnCount = random_range(minCol, maxCol);
+  // Start node (single column)
+  {
+    MapNode start;
+    start.nodeId = nextNodeId++;
+    start.type = MapNode::NodeType::NORMAL;
+    map.columns.push_back({std::move(start)});
+  }
 
+  // Inner columns
+  int columnCount = random_range(minCol, maxCol);
   for (int col = 0; col < columnCount; col++) {
     int rowCount = random_range(minRow, maxRow);
     std::vector<MapNode> column;
@@ -87,18 +107,22 @@ std::vector<MapNode> generate_map() {
     for (int row = 0; row < rowCount; row++) {
       MapNode node;
       node.nodeId = nextNodeId++;
-
-      if (col == columnCount - 1)
-        node.type = NodeType::BOSS;
-      else
-        node.type = get_random_type(col, columnCount);
-
+      node.type = get_random_type(col, columnCount);
       column.push_back(std::move(node));
     }
 
     map.columns.push_back(std::move(column));
   }
 
+  // End node (single column)
+  {
+    MapNode end;
+    end.nodeId = nextNodeId++;
+    end.type = MapNode::NodeType::BOSS;
+    map.columns.push_back({std::move(end)});
+  }
+
+  // Connect all columns (start→inner→end)
   connect_paths(map);
 
   std::vector<MapNode> flattened;

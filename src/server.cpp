@@ -19,6 +19,7 @@
 #include "logging.h"
 #include "protocol.h"
 #include "room.h"
+#include "types.h"
 #include "user.h"
 
 using namespace asio::ip;
@@ -86,8 +87,16 @@ Server::Server(asio::io_context &context, int port,
     state->shopCatalogVersion = cfg.version;
     state->shopCatalogItemIds = cfg.itemIds;
   }
+}
 
-  asio::co_spawn(ioContext, accept_loop(), asio::detached);
+void Server::start() {
+  std::call_once(startOnce, [this]() {
+    auto self = shared_from_this();
+    asio::co_spawn(
+        ioContext,
+        [self]() -> asio::awaitable<void> { co_await self->accept_loop(); },
+        asio::detached);
+  });
 }
 
 json Server::dispatch_request(const json &, const std::shared_ptr<Channel> &) {
@@ -386,7 +395,10 @@ int Server::set_ready(const Protocol::SetReadyReq &req,
     member_uids = room->get_member_uids();
 
     push.type = static_cast<int>(Protocol::HomeRequestType::BROADCAST);
-    push.pushMessages = {};
+    push.pushMessages = room->is_all_ready()
+                            ? std::list<int>{static_cast<int>(
+                                  Protocol::HomePushMessageType::ALL_READY)}
+                            : std::list<int>{};
     push.data = json{
         {"uid", req.uid}, {"ready", req.ready}, {"roomInfo", room->get_info()}};
   }
@@ -523,8 +535,10 @@ int Server::list_rooms(const Protocol::ListRoomsReq &,
   std::lock_guard<std::mutex> lock(state->roomsMutex);
   rsp.roomInfos.clear();
   rsp.roomInfos.reserve(state->rooms.size());
+  // hide rooms that have all members ready
   for (const auto &[id, room] : state->rooms) {
-    rsp.roomInfos.push_back(room->get_info());
+    if (!room->is_all_ready())
+      rsp.roomInfos.push_back(room->get_info());
   }
   return Protocol::SERVICE_SUCCESS;
 }
@@ -583,8 +597,8 @@ json ShopServer::dispatch_request(const json &request,
     bind_user_channel(request.at("uid").get<std::string>(), channel);
   }
 
-  const auto type = static_cast<Protocol::ShopResponseType>(request.value(
-      "type", static_cast<int>(Protocol::ShopResponseType::ERROR)));
+  const auto type = static_cast<Protocol::ShopRequestType>(request.value(
+      "type", static_cast<int>(Protocol::ShopRequestType::ERROR)));
   logging::log("[dispatch][shop] type={}({}) request={}",
                logging::request_type_name(type), static_cast<int>(type),
                request.dump());
