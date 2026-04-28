@@ -9,6 +9,13 @@ if(NOT CMAKE_BUILD_TYPE)
 	set(CMAKE_BUILD_TYPE Release)
 endif()
 
+include(ProcessorCount)
+ProcessorCount(N)
+
+if(NOT N EQUAL 0)
+	message(STATUS "Detected ${N} CPU cores for parallel build")
+endif()
+
 include(CTest)
 include(FetchContent)
 
@@ -30,6 +37,7 @@ if(NOT asio_FOUND)
 	FetchContent_Declare(
 		asio_src
 		URL https://github.com/chriskohlhoff/asio/archive/refs/tags/asio-1-30-2.tar.gz
+		DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 	)
 	FetchContent_GetProperties(asio_src)
 
@@ -54,6 +62,7 @@ if(NOT nlohmann_json_FOUND)
 	FetchContent_Declare(
 		nlohmann_json
 		URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+		DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 	)
 	FetchContent_MakeAvailable(nlohmann_json)
 endif()
@@ -71,6 +80,16 @@ add_executable(collision_demo
 	demos/collision_demo.cpp
 )
 target_link_libraries(collision_demo PRIVATE collision)
+target_precompile_headers(server PRIVATE
+	<nlohmann/json.hpp>
+	<asio.hpp>
+	<algorithm>
+	<memory>
+	<mutex>
+	<string>
+	<unordered_map>
+	<vector>
+)
 
 if(SERVER_BUILD_TESTS)
 	set(TEST_SRC_LIST ${SRC_LIST})
@@ -88,6 +107,7 @@ if(SERVER_BUILD_TESTS)
 		FetchContent_Declare(
 			googletest
 			URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.tar.gz
+			DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 		)
 		set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 		FetchContent_MakeAvailable(googletest)
@@ -116,6 +136,7 @@ if(SERVER_BUILD_TESTS)
 			GTest::gtest_main
 			Threads::Threads
 		)
+		target_precompile_headers("${TEST_NAME}" REUSE_FROM server)
 
 		add_dependencies(unit_tests "${TEST_NAME}")
 		gtest_discover_tests("${TEST_NAME}" TEST_PREFIX "${TEST_NAME}::")

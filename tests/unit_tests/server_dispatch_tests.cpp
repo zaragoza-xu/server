@@ -118,11 +118,14 @@ TEST(ServerDispatchTest, ShopServerDispatchRouting) {
   ASSERT_EQ(createEnv.get<Protocol::ShortEnvelope>().code,
             Protocol::SERVICE_SUCCESS);
 
-  // Shop init via shop server
+  // Shop init via shop server (long dispatch)
   auto shopInitEnv = shopServer->dispatch_request(json(Protocol::ShopInitReq{
       .type = Protocol::ShopRequestType::SHOP_INIT, .uid = uid}));
-  EXPECT_EQ(shopInitEnv.get<Protocol::ShortEnvelope>().code,
-            Protocol::SERVICE_SUCCESS);
+  EXPECT_EQ(shopInitEnv.get<Protocol::LongEnvelope>().type,
+            static_cast<int>(Protocol::ShopRequestType::SHOP_INIT));
+  EXPECT_FALSE(shopInitEnv.get<Protocol::LongEnvelope>()
+                   .data.get<Protocol::ShopInitRsp>()
+                   .items.empty());
 
   // Shop move cursor via shop server (long dispatch, returns null)
   auto shopMoveEnv =

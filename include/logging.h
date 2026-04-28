@@ -2,7 +2,8 @@
 #include <format>
 #include <iostream>
 
-#include "protocol.h"
+#include "battle.h"
+#include "types.h"
 
 namespace logging {
 template <typename... Args> void log(std::string_view fmt, Args &&...args) {
@@ -83,5 +84,31 @@ inline std::string_view request_type_name(Protocol::MapRequestType type) {
     return "MAP_MOVE";
   }
   return "UNKNOWN_MAP_TYPE";
+}
+
+inline std::string_view request_type_name(Protocol::BattleRequestType type) {
+  switch (type) {
+  case Protocol::BattleRequestType::PLAYER_READY:
+    return "PLAYER_READY";
+  case Protocol::BattleRequestType::PLAYER_MOVE:
+    return "PLAYER_MOVE";
+  case Protocol::BattleRequestType::PLAYER_SHOOT:
+    return "PLAYER_SHOOT";
+  case Protocol::BattleRequestType::ERROR:
+    return "ERROR";
+  }
+  return "UNKNOWN_BATTLE_TYPE";
+}
+
+inline std::string_view request_type_name(Protocol::BattleResponseType type) {
+  switch (type) {
+  case Protocol::BattleResponseType::BATTLE_WAIT:
+    return "BATTLE_WAIT";
+  case Protocol::BattleResponseType::BATTLE_FRAME:
+    return "BATTLE_FRAME";
+  case Protocol::BattleResponseType::ERROR:
+    return "ERROR";
+  }
+  return "UNKNOWN_BATTLE_RESPONSE_TYPE";
 }
 } // namespace logging

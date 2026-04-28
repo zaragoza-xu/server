@@ -1,180 +1,332 @@
 # 项目结构与接口设计
 
-本文档描述当前代码实现的真实架构与协议约束。
+本文档描述当前代码实现的真实架构、运行时关系与协议约束。
 
 ## 1. 总体架构
 
 服务端是单进程、事件驱动模型：
 
-- `Server`：监听端口、维护用户/房间状态、执行业务命令
-- `Channel`：单连接收发与消息边界处理
-- `Protocol`：协议类型与 JSON 序列化定义
-- `User` / `Room`：领域实体
+- 单个 `asio::io_context` 驱动所有网络 I/O 和定时任务
+- 五个服务实例共享同一份 `ServerState`
+- `Channel` 负责连接读写与消息分帧
+- `Room` 是房间维度的聚合根，内部承载商店、地图、战斗状态
+- `BattleServer` 通过固定 tick 循环驱动战斗帧广播
 
 启动路径：
 
-1. `main.cpp` 创建 `asio::io_context`
+1. `main.cpp` 解析 `--config`，读取 `config/server.json`
 2. 创建共享 `ServerState`
-3. 启动两个服务实例：
-   - `LoginServer(auth-port)`
-   - `HomeServer(lobby-port)`
-4. `Server` 构造时启动 `accept_loop`
-5. 每个连接创建一个 `Channel`，按行分帧读取 JSON，并调用 `server->dispatch_request`
+3. 启动五个服务实例：
+   - `LoginServer(authPort)`
+   - `HomeServer(lobbyPort)`
+   - `ShopServer(shopPort)`
+   - `MapServer(mapPort)`
+   - `BattleServer(battlePort)`
+4. `main.cpp` 显式调用各个服务的 `start()`  
+5. `Server::start()` 启动接受连接流程（内部保证只启动一次）  
+6. 新连接会创建一个 `Channel`
+7. `Channel::run()` 按行读取 JSON，调用 `server->dispatch_request()`
 
-## 2. 模块职责
+## 2. 类图
 
-### 2.1 Protocol
+```mermaid
+classDiagram
+    class ServerState {
+        +userData
+        +users
+        +rooms
+        +shopCatalogItemIds
+        +shopCatalogVersion
+        +nextRoomId
+        +nextUid
+    }
 
-- 定义命令枚举：
-  - `LoginRequestType`
-  - `HomeRequestType`
-- 定义错误码位掩码 `Protocol::Code`
-- 定义两类响应信封：`ShortEnvelope` 与 `LongEnvelope`
-- 定义请求/响应结构体与 JSON 宏
-- `Req/Rsp` 基类已删除，空响应使用 `EmptyRsp`
-- `RoomInfo` 包含 `readyUids` 字段表示房间内已准备成员
+    class Server {
+        -port
+        -acceptor
+        -ioContext
+        -state
+        -userChannels
+        +dispatch_request(request, channel)
+        +register_user(req, rsp)
+        +login_user(req, rsp)
+        +logout_user(req, rsp)
+        +edit_profile(req, rsp)
+        +create_room(req, rsp)
+        +join_room(req, rsp)
+        +leave_room(req, rsp)
+        +set_ready(req, rsp)
+        +shop_init(req, rsp)
+        +shop_move_cursor(req, rsp)
+        +shop_buy_item(req, rsp)
+        +map_init(req, rsp)
+        +map_move(req, rsp)
+        +battle_player_ready(req, rsp)
+        +battle_player_move(req, rsp)
+        +battle_player_shoot(req, rsp)
+    }
 
-### 2.2 Server
+    class LoginServer
+    class HomeServer
+    class ShopServer
+    class MapServer
+    class BattleServer {
+        -tickTimer
+        -tick_loop()
+    }
 
-- `Server` 作为基类，提供业务 API：
-  - `register_user`
-  - `login_user`
-  - `logout_user`
-  - `create_room`
-  - `join_room`
-  - `leave_room`
-  - `list_rooms`
-- `LoginServer` 和 `HomeServer` 通过命令表覆盖 `dispatch_request`
-- 命令分发采用“普通函数指针 + 模板桥接”模式：
-  - `DispatchFn = json (*)(Server&, const json&)`
-  - `dispatch_entry_short<Req, Rsp, Method>`
-  - `dispatch_entry_long<Req, Rsp, Method>`
+    class Channel {
+        -socket
+        -buf
+        -server
+        +run()
+        +send_message(msg)
+    }
 
-响应契约：
+    class Room {
+        -state
+        -uids
+        -readyStates
+        -shopItemIds
+        -selectedItemByUid
+        -mapNodes
+        -selectedMapNodeByUid
+        -battleReadyStates
+        -battlePlayersByUid
+        -battleBullets
+        -pendingBattleEvents
+        -battleTick
+        +get_info()
+        +add_member(user)
+        +remove_member(uid)
+        +set_member_ready(uid, ready)
+        +is_all_ready()
+        +get_shop_init(rsp)
+        +move_shop_cursor(uid, direction, selectStatus)
+        +buy_shop_item(uid, itemId)
+        +get_map_init(rsp)
+        +move_map(uid, selectId, selectStatus, committed)
+        +set_battle_ready(uid, rsp, allReady)
+        +move_battle_player(uid, input)
+        +shoot_battle_player(uid, direction)
+        +tick_battle(frame)
+    }
 
-- `dispatch_entry_short` 返回 `ShortEnvelope{code, message, data}`
-- `dispatch_entry_long` 返回 `LongEnvelope{type, data, pushMessages}`，
-  其中 direct long response 不携带 `code/message`
+    class User {
+        -state
+        -uid
+        -roomId
+        +get_uid()
+        +get_room_id()
+        +set_room_id(roomId)
+        +is_in_room()
+    }
 
-### 2.3 Channel
+    Server <|-- LoginServer
+    Server <|-- HomeServer
+    Server <|-- ShopServer
+    Server <|-- MapServer
+    Server <|-- BattleServer
+    Server --> ServerState : shared_ptr
+    Server --> Channel : create/dispatch
+    ServerState --> Room : shared_ptr by roomId
+    ServerState --> User : shared_ptr by uid
+    Room --> ServerState : weak_ptr
+    Room --> User : add_member()
+    Channel --> Server : shared_ptr
+    User --> ServerState : weak_ptr
+```
 
-- `run()` 进行读循环
-- 使用 `\n` 作为消息分隔符
-- 校验最大长度，处理空帧和超长帧
-- `handle_message()` 仅负责：
-  - 解析 JSON
-  - 调用 `server->dispatch_request`（携带当前 `Channel` 指针）
-  - 返回统一 Envelope
+## 3. 模块职责
 
-`SET_READY` 成功后会由服务端异步向同房间其他在线成员推送 `LongEnvelope`，用于实时同步准备状态。
-`LEAVE_ROOM` 成功后会向同房间剩余在线成员推送离房广播。
+### 3.1 Protocol 层
 
-## 3. 协议契约
+协议定义拆成两层：
 
-### 3.1 传输层
+- `include/types.h`
+  - 基础枚举与共享类型
+  - `LoginRequestType`、`HomeRequestType`、`ShopResponseType`
+  - `MapRequestType`、`MapResponseType`
+  - `Protocol::Code`
+  - `PlayerBasicInfo`、`PlayerData`、`RoomInfo`、`MapNode`
+- `include/protocol.h`
+  - `ShortEnvelope`、`LongEnvelope`
+  - 登录/大厅/商店/地图请求响应结构
+- `include/battle.h`
+  - 战斗实体模型
+  - 战斗请求响应结构
+  - 战斗事件 DTO
+
+当前关键约束：
+
+- `type` 一律是数值枚举，不能改成字符串
+- `HomeRequestType::HEARTBEAT = 5` 是保留值，不能复用
+- `HomeRequestType::BROADCAST = 8` 仅用于大厅内服务端广播
+- `BattlePushMessageType::BATTLE_START = 0` 用于战斗启动首帧
+
+### 3.2 Server 层
+
+`Server` 是所有服务的共同基类，负责：
+
+- 监听端口并接受连接
+- 通过模板桥接统一命令分发
+- 原子地执行业务状态迁移
+- 维护当前服务实例上的 `uid -> channel` 弱引用映射
+- 向房间成员广播 `LongEnvelope`
+
+分发模型：
+
+- `DispatchFn = json (*)(Server&, const json&)`
+- `dispatch_entry_short<Req, Rsp, Method>`：生成 `ShortEnvelope`
+- `dispatch_entry_long<Req, Rsp, Method>`：生成 `LongEnvelope` 或无直返包
+
+五个子类分别只保留“命令表 + 领域入口”：
+
+- `LoginServer`：认证命令
+- `HomeServer`：大厅与房间命令
+- `ShopServer`：商店阶段命令
+- `MapServer`：地图阶段命令
+- `BattleServer`：战斗命令与帧广播
+
+### 3.3 Channel 层
+
+`Channel` 负责连接级别工作：
+
+- `run()` 读循环
+- 以 `\n` 作为消息边界
+- 处理空帧、超长帧和 JSON 解析失败
+- 将请求转交给当前连接绑定的 `Server`
+- 将 `dispatch_request()` 返回的 envelope 发送回客户端
+
+### 3.4 Room 层
+
+`Room` 不是简单 DTO，而是房间生命周期的聚合根。当前它内部同时维护：
+
+- 房间成员列表与 ready 状态
+- 商店物品目录、选择状态和已购买道具
+- 地图节点与每个玩家的选择同步状态
+- 战斗 ready 状态、玩家实体、子弹实体、事件队列和 tick 计数器
+
+这意味着阶段切换不是跨对象协作，而是 `Room` 内部状态机的演进。
+
+## 4. 运行时行为
+
+### 4.1 大厅与房间生命周期
+
+- `CREATE_ROOM` 创建 `Room` 并把创建者放入成员列表
+- `JOIN_ROOM` / `LEAVE_ROOM` 修改成员关系
+- `SET_READY` 会更新 `readyStates`
+- 当房间内所有成员 ready 时，服务端广播：
+  - `type = HomeRequestType::BROADCAST`
+  - `pushMessages = [0]`
+  - `data` 中携带最新 `roomInfo`
+
+这里的 `pushMessages[0]` 不是一个新的 `HomeRequestType`，而是给客户端的附加语义位，用于表达“当前房间已全员准备”。
+
+### 4.2 商店阶段
+
+- 商店目录启动时从 `config/shop_catalog.json` 读入 `ServerState`
+- `Room` 在构造时快照该目录版本和物品列表
+- `SHOP_MOVE_CURSOR` 与 `SHOP_BUY_ITEM` 都走房间广播同步
+
+### 4.3 地图阶段
+
+- `MAP_INIT` 返回当前房间共享地图
+- `MAP_MOVE` 维护每个玩家的选点状态
+- 当所有玩家对同一可提交节点达成一致时，广播 `MapResponseType::MAP_SYNC`
+
+### 4.4 战斗阶段
+
+战斗由 `BattleServer` 主动驱动，而不是由每个请求直接返回帧：
+
+- `BattleServer` 每 16ms 触发一次 `tick_loop()`
+- `tick_loop()` 扫描所有房间，调用 `Room::tick_battle()`
+- 若房间战斗已开始，则广播 `BATTLE_FRAME`
+
+`PLAYER_READY` 行为：
+
+- 未全员 ready：广播 `BATTLE_WAIT`
+- 全员 ready：
+  - `Room::set_battle_ready()` 内部启动战斗状态
+  - 服务端立即生成一次首帧
+  - 广播 `BATTLE_FRAME`
+  - `pushMessages = [BATTLE_START]`
+
+`PLAYER_MOVE` 行为：
+
+- 请求只更新玩家当前输入方向
+- 实际位移在 `Room::tick_battle()` 中按帧执行
+- 速度取自 `BattlePlayerAttribute::velocity`，当前默认值为 `0.25`
+
+`PLAYER_SHOOT` 行为：
+
+- 立刻创建子弹实体和 `BULLET_SPAWN` 事件
+- 子弹坐标在后续 tick 中继续推进
+
+## 5. 协议契约
+
+### 5.1 传输层
 
 - TCP 文本帧
-- 一条 JSON 一行（以换行符结尾）
+- 一条 JSON 一行
 - 最大消息长度：`65536`
 
-### 3.2 命令枚举（type）
+### 5.2 Envelope 语义
 
-`type` 为枚举数值：
+短响应 `ShortEnvelope`：
 
-- 登录域：`LOGIN=0`、`REGISTER=1`、`LOGOUT=2`、`ERROR=100`
-- 大厅域：
-  - `CREATE_ROOM=0`
-  - `JOIN_ROOM=1`
-  - `LEAVE_ROOM=2`
-  - `LIST_ROOMS=3`
-  - `SEND_MESSAGE=4`（预留）
-  - `HEARTBEAT=5`（历史保留值，当前未实现）
-  - `EDIT_PROFILE=6`（预留）
-  - `SET_READY=7`
-  - `ERROR=100`
+- 适用于登录、建房、列房间等 request/response 命令
+- 结构：`{code, message, data}`
 
-### 3.3 Envelope 语义
+长响应 `LongEnvelope`：
 
-短响应（`ShortEnvelope`）：
+- 适用于阶段同步和服务端推送
+- 结构：`{type, data, pushMessages}`
+- direct long response 不带 `code/message`
+- `NoResponseRsp` 表示命令成功，但 direct response 由连接层直接省略
 
-```json
-{
-  "code": 1,
-  "message": "ok",
-  "data": {}
-}
-```
+### 5.3 错误码
 
-- `code`：状态与细节位掩码
-- `message`：由 `Envelope::map_message_from_code` 生成
-- `data`：
-  - 成功 + 有响应体：序列化响应结构
-  - 成功 + 空响应（`EmptyRsp`）：空对象
-  - 失败：空对象
+`Protocol::Code` 采用位掩码：
 
-长响应（`LongEnvelope`）：
+- 状态位：`SUCCESS`、`FAIL`、`ERROR`
+- 细节位：`BAD_REQUEST`、`NOT_FOUND`、`ROOM_STATE_ERROR` 等
 
-```json
-{
-  "type": 7,
-  "data": {},
-  "pushMessages": []
-}
-```
+这意味着客户端不能把 `code` 当成单一枚举值比较，而应按位判断。
 
-- `type`：请求类型
-- `data`：业务响应体（不含 `code/message`）
-- `pushMessages`：推送类型列表（当前 direct long response 为空）
-- 成功时分两类：
-  - `EmptyRsp`：返回默认 `LongEnvelope`（`data={}`）
-  - `NoResponseRsp`：不返回任何 direct response（连接层跳过发送）
+## 6. 并发模型
 
-## 4. 当前服务接口
-
-`Server` 公开业务接口签名如下：
-
-- `int register_user(const Protocol::RegisterReq&, Protocol::RegisterRsp&)`
-- `int login_user(const Protocol::LoginReq&, Protocol::LoginRsp&)`
-- `int logout_user(const Protocol::LogoutReq&, Protocol::EmptyRsp&)`
-- `int create_room(const Protocol::CreateRoomReq&, Protocol::CreateRoomRsp&)`
-- `int join_room(const Protocol::JoinRoomReq&, Protocol::JoinRoomRsp&)`
-- `int leave_room(const Protocol::LeaveRoomReq&, Protocol::EmptyRsp&)`
-- `int set_ready(const Protocol::SetReadyReq&, Protocol::NoResponseRsp&)`
-- `int list_rooms(const Protocol::ListRoomsReq&, Protocol::ListRoomsRsp&)`
-
-说明：当前 `Channel` 不再保留旧的 `on_*` typed handlers 路径，统一走 `dispatch_request`。
-
-## 5. 并发与状态
-
-- 用户、房间、用户资料与连接映射分别由互斥锁保护：
+- 逻辑上是单进程协程驱动
+- 共享状态仍由互斥锁保护：
   - `usersMutex`
   - `roomsMutex`
-  - `userInfosMutex`
-  - `userChannelsMutex`
-- `LoginServer` 与 `HomeServer` 共享同一个 `ServerState`
+  - `userDataMutex`
+  - `userChannelsMutex`（在各 `Server` 实例内部）
+- `Room` 自身还有 `roomMutex` 保护房间内部聚合状态
 
-`ServerState` 主要结构：
+当前实现仍偏向“串行事件循环 + 保守加锁”，而不是多线程并行模拟。
 
-- `userData`: `uid -> Protocol::PlayerData`
-- `users`: `uid -> 在线 User`
-- `rooms`: `room_id -> Room`
-- `userChannels`: `uid -> lobby channel (weak_ptr)`
+## 7. 构建与测试
 
-## 6. 已实现与预留项
+构建系统特征：
 
-已实现：
+- CMake 3.21+
+- Ninja presets：`debug` / `release`
+- `SERVER_FETCH_DEPS=ON` 时自动拉取缺失依赖
+- `server` 使用预编译头缓存 `asio.hpp`、`nlohmann/json.hpp` 与常用 STL 头
+- `unit_tests` 复用 `server` 的 PCH，降低重复编译成本
 
-- 登录/注册/登出
-- 创建房间/加入房间/离开房间/列房间/设置准备状态
+测试现状：
 
-预留未打通：
+- `tests/unit_tests.cpp` 覆盖协议枚举稳定性
+- 覆盖房间 ready、地图提交、战斗首帧和子弹生成等关键行为
+- 压测脚本位于 `tests/stress_tests/`
 
-- `SEND_MESSAGE`
-- `EDIT_PROFILE`
+## 8. 维护约定
 
-## 7. 维护约定
-
-- 任何协议字段、枚举值、接口签名变更，必须同步更新：
+- 任何协议字段、枚举值、push 语义变更，都必须同步更新：
   - `README.md`
   - `docs/ARCHITECTURE.md`
-  - `tests/unit_tests.cpp`
+  - 相关测试
+- 任何新增服务实例或启动参数，都必须同步更新 `config/server.json` 与运行说明
+- 任何新的 tick 驱动行为，都应优先在 `Room`/`BattleServer` 两侧写单元测试锁定语义

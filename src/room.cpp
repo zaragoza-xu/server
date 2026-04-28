@@ -1,8 +1,10 @@
 #include "room.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <iterator>
 #include <mutex>
+#include <random>
 
 #include "server.h"
 #include "user.h"
@@ -10,8 +12,11 @@
 std::vector<Protocol::MapNode> generate_map();
 
 int Room::get_item_index(const std::string &itemId) const {
-  auto it = std::find(shopItemIds.begin(), shopItemIds.end(), itemId);
-  if (it == shopItemIds.end()) {
+  const size_t visible_count = std::min(uids.size(), shopItemIds.size());
+  auto visible_end =
+      shopItemIds.begin() + static_cast<std::ptrdiff_t>(visible_count);
+  auto it = std::find(shopItemIds.begin(), visible_end, itemId);
+  if (it == visible_end) {
     return -1;
   }
   return static_cast<int>(std::distance(shopItemIds.begin(), it));
@@ -59,17 +64,27 @@ Room::Room(int roomId, size_t maximumPeople, std::shared_ptr<ServerState> state,
   const auto creator_uid = creator->get_uid();
   uids.push_back(creator_uid);
   readyStates.emplace(creator_uid, false);
+  battleReadyStates.emplace(creator_uid, false);
   ownedItemsByUid.emplace(creator_uid, std::vector<std::string>{});
 
   auto shared_state = this->state.lock();
-  if (shared_state && !shared_state->shopCatalogItemIds.empty()) {
-    shopItemIds = shared_state->shopCatalogItemIds;
+  const std::vector<std::string> &catalog =
+      (shared_state && !shared_state->shopCatalogItemIds.empty())
+          ? shared_state->shopCatalogItemIds
+          : []() -> const std::vector<std::string> & {
+    static const std::vector<std::string> fallback = {
+        "sword", "shield", "potion", "boots", "wand"};
+    return fallback;
+  }();
+  if (shared_state) {
     shopCatalogVersion = shared_state->shopCatalogVersion;
   } else {
-    // Fallback static catalog.
-    shopItemIds = {"sword", "shield", "potion", "boots", "wand"};
     shopCatalogVersion = "embedded-v1";
   }
+
+  shopItemIds = catalog;
+  std::shuffle(shopItemIds.begin(), shopItemIds.end(),
+               std::mt19937{std::random_device{}()});
 }
 
 Protocol::RoomInfo Room::get_info() const {
@@ -118,14 +133,18 @@ bool Room::add_member(std::shared_ptr<User> user) {
     return false; // room is full
   uids.push_back(uid);
   readyStates.emplace(uid, false);
+  battleReadyStates.emplace(uid, false);
   ownedItemsByUid.emplace(uid, std::vector<std::string>{});
   return true;
 }
 
-std::vector<Protocol::ShopItem> Room::build_shop_items_locked() const {
+std::vector<Protocol::ShopItem>
+Room::build_shop_items_locked(const size_t size) const {
+  const size_t visible_count = std::min(size, shopItemIds.size());
   std::vector<Protocol::ShopItem> items;
-  items.reserve(shopItemIds.size());
-  for (const auto &id : shopItemIds) {
+  items.reserve(visible_count);
+  for (size_t index = 0; index < visible_count; ++index) {
+    const auto &id = shopItemIds[index];
     Protocol::ShopItem item;
     item.itemId = id;
     if (takenItems.count(id)) {
@@ -156,7 +175,7 @@ bool Room::get_shop_init(Protocol::ShopInitRsp &rsp) const {
   }
 
   std::scoped_lock lock(roomMutex, shared_state->userDataMutex);
-  rsp.items = build_shop_items_locked();
+  rsp.items = build_shop_items_locked(uids.size());
   rsp.playerInfos.clear();
   rsp.playerInfos.reserve(uids.size());
 
@@ -181,11 +200,11 @@ bool Room::move_shop_cursor(const std::string &uid, const std::string &itemId,
   std::lock_guard<std::mutex> lock(roomMutex);
   if (get_item_index(itemId) < 0) {
     selectedItemByUid.erase(uid);
-    items = build_shop_items_locked();
+    items = build_shop_items_locked(uids.size());
     return true; // Invalid itemId is treated as deselection, not an error
   }
   selectedItemByUid[uid] = itemId;
-  items = build_shop_items_locked();
+  items = build_shop_items_locked(uids.size());
   return true;
 }
 
@@ -209,7 +228,7 @@ int Room::buy_shop_item(const std::string &uid, const std::string &itemId,
     }
   }
 
-  items = build_shop_items_locked();
+  items = build_shop_items_locked(uids.size());
   return Protocol::SERVICE_SUCCESS;
 }
 
