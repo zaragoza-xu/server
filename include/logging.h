@@ -2,7 +2,7 @@
 #include <format>
 #include <iostream>
 
-#include "protocol.h"
+#include "types.h"
 
 namespace logging {
 template <typename... Args> void log(std::string_view fmt, Args &&...args) {
@@ -53,11 +53,11 @@ inline std::string_view request_type_name(Protocol::HomeRequestType type) {
   return "UNKNOWN_HOME_TYPE";
 }
 
-inline std::string_view request_type_name(Protocol::ShopRequestType type) {
+inline std::string_view request_type_name(Protocol::ShopResponseType type) {
   switch (type) {
-  case Protocol::ShopRequestType::SHOP_INIT:
+  case Protocol::ShopResponseType::SHOP_INIT:
     return "SHOP_INIT";
-  case Protocol::ShopRequestType::SHOP_MOVE_CURSOR:
+  case Protocol::ShopResponseType::SHOP_MOVE_CURSOR:
     return "SHOP_MOVE_CURSOR";
   case Protocol::ShopRequestType::SHOP_BUY:
     return "SHOP_BUY";

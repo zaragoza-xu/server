@@ -215,14 +215,14 @@ public:
 
 private:
   struct CommandDescriptor {
-    Protocol::ShopRequestType type;
+    Protocol::ShopResponseType type;
     DispatchFn dispatch;
   };
   const std::array<ShopServer::CommandDescriptor, 3> COMMAND_TABLE{{
-      {Protocol::ShopRequestType::SHOP_INIT,
+      {Protocol::ShopResponseType::SHOP_INIT,
        &Server::dispatch_entry_long<Protocol::ShopInitReq,
                                     Protocol::ShopInitRsp, &Server::shop_init>},
-      {Protocol::ShopRequestType::SHOP_MOVE_CURSOR,
+      {Protocol::ShopResponseType::SHOP_MOVE_CURSOR,
        &Server::dispatch_entry_long<Protocol::ShopMoveCursorReq,
                                     Protocol::NoResponseRsp,
                                     &Server::shop_move_cursor>},

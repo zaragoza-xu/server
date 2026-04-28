@@ -583,8 +583,8 @@ json ShopServer::dispatch_request(const json &request,
     bind_user_channel(request.at("uid").get<std::string>(), channel);
   }
 
-  const auto type = static_cast<Protocol::ShopRequestType>(request.value(
-      "type", static_cast<int>(Protocol::ShopRequestType::ERROR)));
+  const auto type = static_cast<Protocol::ShopResponseType>(request.value(
+      "type", static_cast<int>(Protocol::ShopResponseType::ERROR)));
   logging::log("[dispatch][shop] type={}({}) request={}",
                logging::request_type_name(type), static_cast<int>(type),
                request.dump());
