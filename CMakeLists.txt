@@ -98,8 +98,12 @@ target_precompile_headers(server_core PRIVATE
 target_precompile_headers(server REUSE_FROM server_core)
 
 if(SERVER_BUILD_TESTS)
-	include(CTest)
-	file(GLOB UNIT_TEST_FILES CONFIGURE_DEPENDS "tests/unit_tests/*_tests.cpp")
+	set(TEST_SRC_LIST ${SRC_LIST})
+	list(FILTER TEST_SRC_LIST EXCLUDE REGEX "src/main\\.cpp$")
+	file(GLOB UNIT_TEST_FILES CONFIGURE_DEPENDS
+		"tests/unit_tests/*_tests.cpp"
+		"tests/network_tests/*_tests.cpp"
+	)
 
 	find_package(GTest CONFIG QUIET)
 
@@ -119,6 +123,8 @@ if(SERVER_BUILD_TESTS)
 	endif()
 
 	include(GoogleTest)
+
+	enable_testing()
 
 	add_custom_target(unit_tests)
 
