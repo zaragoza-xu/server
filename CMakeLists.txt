@@ -9,6 +9,8 @@ if(NOT CMAKE_BUILD_TYPE)
 	set(CMAKE_BUILD_TYPE Release)
 endif()
 
+option(SERVER_BUILD_TESTS "Build unit tests target" OFF)
+
 include(ProcessorCount)
 ProcessorCount(N)
 
@@ -16,13 +18,13 @@ if(NOT N EQUAL 0)
 	message(STATUS "Detected ${N} CPU cores for parallel build")
 endif()
 
-include(CTest)
 include(FetchContent)
 
 option(SERVER_FETCH_DEPS "Automatically download missing third-party dependencies" ON)
-option(SERVER_BUILD_TESTS "Build unit tests target" ${BUILD_TESTING})
 
 file(GLOB SRC_LIST CONFIGURE_DEPENDS "src/*.cpp")
+set(SERVER_CORE_SRC_LIST ${SRC_LIST})
+list(FILTER SERVER_CORE_SRC_LIST EXCLUDE REGEX "src/main\\.cpp$")
 
 find_package(Threads REQUIRED)
 
@@ -67,20 +69,23 @@ if(NOT nlohmann_json_FOUND)
 	FetchContent_MakeAvailable(nlohmann_json)
 endif()
 
-add_executable(server "${SRC_LIST}")
-target_include_directories(server PUBLIC "${PROJECT_SOURCE_DIR}/include" "${PROJECT_SOURCE_DIR}/third_party")
-target_link_libraries(server PRIVATE asio::asio nlohmann_json::nlohmann_json Threads::Threads)
+add_library(server_core STATIC ${SERVER_CORE_SRC_LIST})
+target_include_directories(server_core PUBLIC "${PROJECT_SOURCE_DIR}/include" "${PROJECT_SOURCE_DIR}/third_party")
+target_link_libraries(server_core PUBLIC asio::asio nlohmann_json::nlohmann_json Threads::Threads)
 
 add_library(collision
 	demos/collision.cpp
 )
 target_include_directories(collision PUBLIC "${PROJECT_SOURCE_DIR}/demos")
 
+add_executable(server src/main.cpp)
+target_link_libraries(server PRIVATE server_core)
+
 add_executable(collision_demo
 	demos/collision_demo.cpp
 )
 target_link_libraries(collision_demo PRIVATE collision)
-target_precompile_headers(server PRIVATE
+target_precompile_headers(server_core PRIVATE
 	<nlohmann/json.hpp>
 	<asio.hpp>
 	<algorithm>
@@ -90,10 +95,10 @@ target_precompile_headers(server PRIVATE
 	<unordered_map>
 	<vector>
 )
+target_precompile_headers(server REUSE_FROM server_core)
 
 if(SERVER_BUILD_TESTS)
-	set(TEST_SRC_LIST ${SRC_LIST})
-	list(FILTER TEST_SRC_LIST EXCLUDE REGEX "src/main\\.cpp$")
+	include(CTest)
 	file(GLOB UNIT_TEST_FILES CONFIGURE_DEPENDS "tests/unit_tests/*_tests.cpp")
 
 	find_package(GTest CONFIG QUIET)
@@ -120,23 +125,18 @@ if(SERVER_BUILD_TESTS)
 	foreach(TEST_FILE IN LISTS UNIT_TEST_FILES)
 		get_filename_component(TEST_NAME "${TEST_FILE}" NAME_WE)
 
-		add_executable("${TEST_NAME}"
-			"${TEST_FILE}"
-			"${TEST_SRC_LIST}"
-		)
+		add_executable("${TEST_NAME}" "${TEST_FILE}")
 		target_include_directories("${TEST_NAME}" PUBLIC
 			"${PROJECT_SOURCE_DIR}/include"
 			"${PROJECT_SOURCE_DIR}/demos"
 		)
 		target_link_libraries("${TEST_NAME}" PRIVATE
-			asio::asio
-			nlohmann_json::nlohmann_json
+			server_core
 			collision
 			GTest::gtest
 			GTest::gtest_main
-			Threads::Threads
 		)
-		target_precompile_headers("${TEST_NAME}" REUSE_FROM server)
+		target_precompile_headers("${TEST_NAME}" REUSE_FROM server_core)
 
 		add_dependencies(unit_tests "${TEST_NAME}")
 		gtest_discover_tests("${TEST_NAME}" TEST_PREFIX "${TEST_NAME}::")

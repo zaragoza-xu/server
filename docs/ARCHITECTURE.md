@@ -22,8 +22,8 @@
    - `ShopServer(shopPort)`
    - `MapServer(mapPort)`
    - `BattleServer(battlePort)`
-4. `main.cpp` 显式调用各个服务的 `start()`  
-5. `Server::start()` 启动接受连接流程（内部保证只启动一次）  
+4. `main.cpp` 显式调用各个服务的 `start()`
+5. `Server::start()` 启动接受连接流程（内部保证只启动一次）
 6. 新连接会创建一个 `Channel`
 7. `Channel::run()` 按行读取 JSON，调用 `server->dispatch_request()`
 
@@ -102,8 +102,8 @@ classDiagram
         +set_member_ready(uid, ready)
         +is_all_ready()
         +get_shop_init(rsp)
-        +move_shop_cursor(uid, direction, selectStatus)
-        +buy_shop_item(uid, itemId)
+        +move_shop_cursor(uid, itemId, items)
+        +buy_shop_item(uid, itemId, items)
         +get_map_init(rsp)
         +move_map(uid, selectId, selectStatus, committed)
         +set_battle_ready(uid, rsp, allReady)
@@ -141,12 +141,12 @@ classDiagram
 
 ### 3.1 Protocol 层
 
-协议定义拆成两层：
+协议定义拆成三层：
 
 - `include/types.h`
   - 基础枚举与共享类型
-  - `LoginRequestType`、`HomeRequestType`、`ShopResponseType`
-  - `MapRequestType`、`MapResponseType`
+  - `LoginRequestType`、`HomeRequestType`、`ShopRequestType`
+  - `ShopResponseType`、`MapRequestType`、`MapResponseType`
   - `Protocol::Code`
   - `PlayerBasicInfo`、`PlayerData`、`RoomInfo`、`MapNode`
 - `include/protocol.h`
@@ -162,6 +162,8 @@ classDiagram
 - `type` 一律是数值枚举，不能改成字符串
 - `HomeRequestType::HEARTBEAT = 5` 是保留值，不能复用
 - `HomeRequestType::BROADCAST = 8` 仅用于大厅内服务端广播
+- `ShopRequestType::SHOP_BUY = 2` 是当前购买命令值
+- `ShopResponseType::SHOP_SYNC = 0` 是当前商店广播类型
 - `BattlePushMessageType::BATTLE_START = 0` 用于战斗启动首帧
 
 ### 3.2 Server 层
@@ -226,14 +228,26 @@ classDiagram
 ### 4.2 商店阶段
 
 - 商店目录启动时从 `config/shop_catalog.json` 读入 `ServerState`
-- `Room` 在构造时快照该目录版本和物品列表
-- `SHOP_MOVE_CURSOR` 与 `SHOP_BUY_ITEM` 都走房间广播同步
+- `Room` 在构造时快照该目录版本和完整物品列表，并随机打乱一次顺序
+- 房间当前可见物品数量等于 `min(当前人数, 目录物品数)`
+- `SHOP_INIT` 走 direct long response，返回 `{items, playerInfos}`
+- `SHOP_MOVE_CURSOR` 成功后不发送 direct response，而是广播 `SHOP_SYNC`
+- `SHOP_MOVE_CURSOR` 的 `itemId` 不存在时，当前实现按“取消当前选择”处理，不返回错误
+- `SHOP_BUY` 成功后广播 `SHOP_SYNC`
+- `SHOP_BUY` 会校验 item 是否在当前可见前缀内，且不能重复购买
 
 ### 4.3 地图阶段
 
 - `MAP_INIT` 返回当前房间共享地图
 - `MAP_MOVE` 维护每个玩家的选点状态
 - 当所有玩家对同一可提交节点达成一致时，广播 `MapResponseType::MAP_SYNC`
+
+当前地图生成约束：
+
+- 地图第一列和最后一列都是单节点
+- 最后一列节点类型固定为 `BOSS`
+- 相邻列连接使用单调区间覆盖：无交叉、允许一对多、允许多对一，并覆盖后一列全部节点
+- 首次提交必须从根节点开始；后续提交必须是当前已提交节点的合法后继
 
 ### 4.4 战斗阶段
 
@@ -276,7 +290,7 @@ classDiagram
 短响应 `ShortEnvelope`：
 
 - 适用于登录、建房、列房间等 request/response 命令
-- 结构：`{code, message, data}`
+- 结构：`{code, data, message}`
 
 长响应 `LongEnvelope`：
 
@@ -311,16 +325,29 @@ classDiagram
 构建系统特征：
 
 - CMake 3.21+
-- Ninja presets：`debug` / `release`
+- Ninja presets：`release`、`debug`、`debug-tests`、`release-vcpkg`
 - `SERVER_FETCH_DEPS=ON` 时自动拉取缺失依赖
-- `server` 使用预编译头缓存 `asio.hpp`、`nlohmann/json.hpp` 与常用 STL 头
-- `unit_tests` 复用 `server` 的 PCH，降低重复编译成本
+- 默认 `SERVER_BUILD_TESTS=OFF`
+- 非 `main.cpp` 业务源码会先编译为 `server_core`，再由 `server` 和测试目标共同链接复用
+- `server_core` 使用预编译头缓存 `asio.hpp`、`nlohmann/json.hpp` 与常用 STL 头
+- 测试目标复用 `server_core` 的 PCH，降低重复编译成本
 
 测试现状：
 
-- `tests/unit_tests.cpp` 覆盖协议枚举稳定性
-- 覆盖房间 ready、地图提交、战斗首帧和子弹生成等关键行为
+- `tests/unit_tests/protocol_tests.cpp` 覆盖协议枚举稳定性与 Envelope JSON 往返
+- `tests/unit_tests/room_behavior_tests.cpp` 覆盖房间成员、ready 和商店物品数量规则
+- `tests/unit_tests/map_tests.cpp` 覆盖地图连接无交叉、全覆盖与层级一致性
+- `tests/unit_tests/server_auth_room_lifecycle_tests.cpp` 覆盖房间/商店主流程
+- `tests/unit_tests/server_dispatch_tests.cpp` 与 `server_error_paths_tests.cpp` 覆盖分发与错误路径
 - 压测脚本位于 `tests/stress_tests/`
+
+推荐测试命令：
+
+```bash
+cmake --preset debug-tests
+cmake --build --preset debug-tests
+ctest --preset debug-tests
+```
 
 ## 8. 维护约定
 

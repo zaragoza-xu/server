@@ -14,7 +14,8 @@
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "SERVER_BUILD_TESTS": "OFF"
       }
     },
     {
@@ -25,7 +26,20 @@
       "binaryDir": "${sourceDir}/build/debug",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "SERVER_BUILD_TESTS": "OFF"
+      }
+    },
+    {
+      "name": "debug-tests",
+      "displayName": "Debug Tests",
+      "description": "Debug configure with Ninja and unit tests enabled",
+      "inherits": "debug",
+      "binaryDir": "${sourceDir}/build/debug-tests",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "SERVER_BUILD_TESTS": "ON"
       }
     },
     {
@@ -34,7 +48,8 @@
       "description": "Release configure with Ninja and vcpkg toolchain",
       "inherits": "release",
       "cacheVariables": {
-        "CMAKE_TOOLCHAIN_FILE": "$env{HOME}/opt/vcpkg/scripts/buildsystems/vcpkg.cmake"
+        "CMAKE_TOOLCHAIN_FILE": "$env{HOME}/opt/vcpkg/scripts/buildsystems/vcpkg.cmake",
+        "SERVER_BUILD_TESTS": "OFF"
       }
     }
   ],
@@ -48,8 +63,29 @@
       "configurePreset": "debug"
     },
     {
+      "name": "debug-tests",
+      "configurePreset": "debug-tests",
+      "targets": [
+        "unit_tests"
+      ]
+    },
+    {
       "name": "release-vcpkg",
       "configurePreset": "release-vcpkg"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "debug-tests",
+      "displayName": "Debug Tests",
+      "description": "Run all unit tests from the debug-tests build directory",
+      "configurePreset": "debug-tests",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "stopOnFailure": false
+      }
     }
   ]
 }

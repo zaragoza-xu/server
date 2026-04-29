@@ -1,38 +1,51 @@
 # 测试清单（收敛版）
 
-本文档将测试范围收敛为三条主线：
+本文档基于当前实现，收敛为四条主线：
 
-- 协议契约快照测试（字段、类型、空 `data` 约束）
+- 协议契约测试（短响应、长响应、枚举稳定性）
 - TCP 端到端集成测试（半包、粘包、非法 JSON、断连恢复）
 - 并发一致性测试（并发 join/leave、边界容量）
+- 阶段行为测试（商店、地图、战斗）
 
 ## 0. 统一前提
 
 - 协议 `type` 为数值枚举，不是字符串。
-- 所有响应都必须是 `Envelope{code,message,data}`。
+- 成功的 short response 使用 `ShortEnvelope{code,data,message}`。
+- 成功的 long response 使用 `LongEnvelope{type,data,pushMessages}`。
+- `NoResponseRsp` 表示成功后不发送 direct response，而改走广播。
 - 成功响应：`code & SUCCESS != 0`。
 - 失败响应：`code & FAIL` 或 `code & ERROR` 至少一个非 0。
 
-## 1. 协议契约快照测试（P0，必须）
+## 1. 协议契约测试（P0，必须）
 
 ### 1.1 覆盖命令
 
 - 登录域：`REGISTER`、`LOGIN`、`LOGOUT`
 - 大厅域：`CREATE_ROOM`、`JOIN_ROOM`、`LEAVE_ROOM`、`LIST_ROOMS`
+- 商店域：`SHOP_INIT`、`SHOP_MOVE_CURSOR`、`SHOP_BUY`
+- 地图域：`MAP_INIT`、`MAP_MOVE`
 
 ### 1.2 快照断言（每个命令都要有）
 
-- 顶层字段必须存在：`code`、`message`、`data`
+- short response 顶层字段必须存在：`code`、`message`、`data`
+- long response 顶层字段必须存在：`type`、`data`、`pushMessages`
 - 字段类型固定：
-	- `code` 为 number
+	- `code` / `type` 为 number
 	- `message` 为 string
 	- `data` 为 object
+	- `pushMessages` 为 array
 - `type` 字段必须是 number（非法类型进入错误分支）
 
-### 1.3 空 data 约束
+### 1.3 空 data 与结构约束
 
 - 对应 `EmptyRsp` 的成功命令，`data` 必须是空对象 `{}`。
-- 对应非空响应命令（如注册、登录、建房、加房、列房），`data` 必须包含预期业务字段。
+- 对应非空 short response 命令，`data` 必须包含预期业务字段。
+- 对应 long response 命令，`data` 必须符合当前阶段结构，例如：
+	- `SHOP_INIT -> {items, playerInfos}`
+	- `MAP_INIT -> {map}`
+	- `MAP_SYNC -> {selectStatus}`
+	- `BATTLE_WAIT -> {gameFrame, readyCount, totalCount}`
+	- `BATTLE_FRAME -> {serverTick, playerEntities, enemyEntities, bulletEntities, events}`
 
 ### 1.4 错误码契约
 
@@ -53,7 +66,7 @@
 ### 2.2 输入健壮性
 
 - 非法 JSON（缺失括号、引号错误等）不应导致崩溃。
-- 字段缺失/字段类型错误应返回失败 Envelope。
+- 字段缺失/字段类型错误应返回失败 `ShortEnvelope`。
 - 多余字段不应影响已定义字段解析。
 
 ### 2.3 连接生命周期
@@ -82,26 +95,53 @@
 - `rooms` 中成员容器大小与成员列表一致。
 - 离房后用户 `room_id` 复位。
 
-## 4. 分层落地建议
+## 4. 阶段行为测试（P0-P1，高优先）
 
-### 4.1 单元测试
+### 4.1 商店阶段
+
+- `SHOP_INIT` 返回的 `items.size()` 应等于 `min(当前房间人数, 物品库大小)`。
+- 同一房间的商店物品顺序在房间创建后保持稳定，不应每次 `SHOP_INIT` 都重新洗牌。
+- `SHOP_MOVE_CURSOR` 对非法 `itemId` 应按当前实现视为取消选择，而不是失败。
+- `SHOP_BUY` 对已购买物品返回 `SHOP_ITEM_TAKEN`。
+- `SHOP_BUY` 对不可见或不存在的物品返回 `SHOP_INVALID_ITEM`。
+
+### 4.2 地图阶段
+
+- `MAP_INIT` 懒生成共享地图，后续调用返回同一张图。
+- 第一列必须是唯一根节点，最后一列必须是唯一 `BOSS` 节点。
+- 相邻列连接必须满足：无交叉、后一列全覆盖、允许一对多和多对一。
+- 首次提交必须从根节点开始。
+- 后续提交必须是当前已提交节点的合法后继。
+- 只有全员选择同一节点时才会 commit。
+
+### 4.3 战斗阶段
+
+- `PLAYER_READY` 未全员就绪时广播 `BATTLE_WAIT`。
+- 全员就绪时首个广播应为 `BATTLE_FRAME`，且 `pushMessages` 含 `BATTLE_START`。
+- `PLAYER_MOVE` 只记录输入，实体位置在 tick 中更新。
+- `PLAYER_SHOOT` 生成子弹实体并产生 `BULLET_SPAWN` 事件。
+
+## 5. 分层落地建议
+
+### 5.1 单元测试
 
 - `Protocol` 序列化/反序列化与 Envelope 映射
 - `Room` 容量与成员变更逻辑
-- `Server` 业务 API 状态迁移
+- `Room` 商店数量规则、地图提交规则、战斗状态推进
+- `Server` 业务 API 状态迁移与广播分发
 
-### 4.2 集成测试
+### 5.2 集成测试
 
 - 真实 TCP 连接测试完整命令流
-- 覆盖 auth/lobby 两个端口
+- 覆盖 auth/lobby/shop/map/battle 五个端口
 
-### 4.3 稳定性测试
+### 5.3 稳定性测试
 
 - 并发压力 + 随机断连 + 非法报文混注
 - 关注崩溃、死锁、资源泄漏
 
-## 5. 验收门槛（收敛）
+## 6. 验收门槛（收敛）
 
 - Gate A（必须）：第 1 章全部通过。
 - Gate B（发布前）：第 2 章全部通过。
-- Gate C（里程碑）：第 3 章核心场景通过且无高优缺陷。
+- Gate C（里程碑）：第 3 章与第 4 章核心场景通过且无高优缺陷。
