@@ -1,0 +1,39 @@
+name: C++ Tests
+
+on:
+  push:
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'demos/**'
+      - 'tests/**'
+      - 'CMakeLists.txt'
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'demos/**'
+      - 'tests/**'
+      - 'CMakeLists.txt'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+
+      - name: Configure (debug-tests preset)
+        run: cmake --preset debug-tests
+
+      - name: Build (debug-tests preset)
+        run: cmake --build --preset debug-tests
+
+      - name: Run tests
+        run: ctest --preset debug-tests --output-on-failure
