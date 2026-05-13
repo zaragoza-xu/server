@@ -184,7 +184,8 @@
 - `src/main.cpp`：配置加载与五个服务启动
 - `config/server.json`：端口配置
 - `config/shop_catalog.json`：商店物品目录
-- `tests/unit_tests/`：单元测试目录
+- `tests/unit_tests/`：单元测试目录（`*_tests.cpp`，主要覆盖房间/协议路由/错误码等纯逻辑）
+- `tests/network_tests/`：网络与集成测试目录（TCP 分帧、端到端链路、多服务协同）
 - `tests/stress_tests/`：压测脚本与场景
 
 ## 构建
@@ -249,6 +250,38 @@ ctest --test-dir build/debug-tests -R "^collision_detection_tests::" --output-on
 - 地图初始化与同步提交流程
 - 战斗 ready、首帧生成、子弹生成
 - 主要服务错误路径与分发路由
+
+## 网络/集成测试
+
+网络测试使用真实 TCP 端到端连接，主要覆盖：
+
+- `tests/network_tests/fake_client.h`：测试客户端，按换行符 `\n` 分帧发送/接收 JSON
+- `tests/network_tests/channel_network_tests.cpp`：`Channel` 分帧行为（CRLF、多帧合并、空行跳过、超长载荷处理/连接关闭）
+- `tests/network_tests/login_network_tests.cpp`：登录域（`REGISTER`/`LOGIN`/错误 JSON）
+- 多服务端到端（共享同一份 `ServerState`）：
+  - `tests/network_tests/home_network_tests.cpp`：`CREATE_ROOM` / `LIST_ROOMS` / `JOIN_ROOM`
+  - `tests/network_tests/shop_network_tests.cpp`：`SHOP_INIT` / `SHOP_MOVE_CURSOR`（异步推送）
+  - `tests/network_tests/map_network_tests.cpp`：`MAP_INIT` / `MAP_MOVE`（异步推送）
+  - `tests/network_tests/battle_network_tests.cpp`：`PLAYER_READY` -> `BATTLE_WAIT`/`BATTLE_FRAME`
+
+构建：
+
+```bash
+cmake --preset release
+cmake --build --preset release --target unit_tests
+```
+
+运行：
+
+```bash
+ctest --test-dir build -R "network_tests::" --output-on-failure
+```
+
+也可按文件名单独跑（例如 Home）：
+
+```bash
+ctest --test-dir build -R "^home_network_tests::" --output-on-failure
+```
 
 ## 运行
 
