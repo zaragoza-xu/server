@@ -17,6 +17,18 @@ struct ServerState;
 
 class Room {
 private:
+  struct BattleEnemyState {
+    Protocol::BattleEnemyEntity entity;
+    double attackRange = 1.5;
+  };
+
+  struct EnemySpawnSpec {
+    Protocol::BattleEnemyType enemyType =
+        Protocol::BattleEnemyType::BUBBLE_FISH;
+    Protocol::BattleVector2 position;
+    int maxHP = 10;
+  };
+
   std::weak_ptr<ServerState> state;
   int roomId;
   int mapNodeId = -1;
@@ -33,7 +45,7 @@ private:
   std::unordered_map<std::string, bool> battleReadyStates;
   std::unordered_map<std::string, Protocol::BattlePlayerEntity>
       battlePlayersByUid;
-  std::vector<Protocol::BattleEnemyEntity> battleEnemies;
+  std::vector<BattleEnemyState> battleEnemyStates;
   std::vector<Protocol::BattleBulletEntity> battleBullets;
   std::vector<Protocol::BattleEventDTO> pendingBattleEvents;
   int battleTick = 0;
@@ -47,8 +59,13 @@ private:
   bool try_commit_map_move_locked();
   std::vector<Protocol::ShopItem> build_shop_items_locked(const size_t) const;
   void reset_battle_state_locked();
-  Protocol::BattleFrameRsp build_battle_frame_locked(
-      const std::vector<Protocol::BattleEventDTO> &events) const;
+  Protocol::BattleFrameRsp build_battle_frame_locked() const;
+  Protocol::MapNode::NodeType resolve_map_node_type_locked() const;
+  std::vector<EnemySpawnSpec>
+  build_spawn_plan_locked(Protocol::MapNode::NodeType nodeType) const;
+  void spawn_enemies_locked(const std::vector<EnemySpawnSpec> &spawnPlan);
+  bool update_enemy_intent_locked(BattleEnemyState &enemyState);
+  void push_enemy_intent_locked(const BattleEnemyState &enemyState);
   void start_battle_locked();
 
 public:
