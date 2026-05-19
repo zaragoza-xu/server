@@ -118,7 +118,7 @@
 
 - `PLAYER_READY` 未全员就绪时广播 `BATTLE_WAIT`。
 - 全员就绪时首个广播应为 `BATTLE_FRAME`，且 `pushMessages` 含 `BATTLE_START`。
-- `PLAYER_MOVE` 只记录输入，实体位置在 tick 中更新。
+- `BATTLE_SYNC` 上报玩家位置和怪物位置；玩家位置直接转发，怪物位置在 tick 中按实体均值聚合。
 - `PLAYER_SHOOT` 生成子弹实体并产生 `BULLET_SPAWN` 事件。
 
 ## 5. 分层落地建议

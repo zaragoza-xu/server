@@ -19,8 +19,8 @@ enum class EntityType {
 };
 
 struct BattleVector2 {
-  double x = 0.0f;
-  double y = 0.0f;
+  double x = 0.0;
+  double y = 0.0;
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(BattleVector2, x, y)
 };
 
@@ -83,7 +83,13 @@ inline void from_json(const json &j, BattleBulletEntity &e) {
 
 // ===== 敌人相关 =====
 
-enum class EnemyType { BUBBLE_FISH = 0 };
+enum class BattleEnemyType { BUBBLE_FISH = 0 };
+
+enum class BattleEnemyIntent {
+  IDLE = 0,
+  CHASE = 1,
+  ATTACK = 2,
+};
 
 struct BattleEnemyAttribute {
   int currentHP = 0;
@@ -94,14 +100,16 @@ struct BattleEnemyAttribute {
 
 struct BattleEnemyEntity : BattleEntity {
   BattleEnemyAttribute attribute;
-  EnemyType enemyType = EnemyType::BUBBLE_FISH;
+  BattleEnemyType enemyType = BattleEnemyType::BUBBLE_FISH;
   std::string targetPlayerUid;
+  BattleEnemyIntent currentIntent = BattleEnemyIntent::IDLE;
 };
 inline void to_json(json &j, const BattleEnemyEntity &e) {
   to_json(j, static_cast<const BattleEntity &>(e));
   j["attribute"] = e.attribute;
   j["enemyType"] = e.enemyType;
   j["targetPlayerUid"] = e.targetPlayerUid;
+  j["currentIntent"] = e.currentIntent;
 }
 inline void from_json(const json &j, BattleEnemyEntity &e) {
   from_json(j, static_cast<BattleEntity &>(e));
@@ -111,11 +119,13 @@ inline void from_json(const json &j, BattleEnemyEntity &e) {
     j.at("enemyType").get_to(e.enemyType);
   if (j.contains("targetPlayerUid"))
     j.at("targetPlayerUid").get_to(e.targetPlayerUid);
+  if (j.contains("currentIntent"))
+    j.at("currentIntent").get_to(e.currentIntent);
 }
 
 enum class BattleRequestType {
   PLAYER_READY = 0,
-  PLAYER_MOVE = 1,
+  BATTLE_SYNC = 1,
   PLAYER_SHOOT = 2,
   ERROR = 100,
 };
@@ -136,12 +146,24 @@ struct BattlePlayerReadyReq {
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(BattlePlayerReadyReq, type, uid)
 };
 
-struct BattlePlayerMoveReq {
+struct BattlePos {
+  int entityId = 0;
+  BattleVector2 position;
+  BattleVector2 direction;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(BattlePos, entityId, position,
+                                              direction)
+};
+
+struct BattleSyncReq {
   BattleRequestType type;
   std::string uid;
-  BattleVector2 input;
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(BattlePlayerMoveReq, type, uid,
-                                              input)
+  BattleVector2 playerPosition;
+  BattleVector2 playerDirection;
+  std::vector<BattlePos> enemyPositions;
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(BattleSyncReq, type, uid,
+                                              playerPosition, playerDirection,
+                                              enemyPositions)
 };
 
 struct BattlePlayerShootReq {
@@ -162,6 +184,8 @@ enum class BattleEventType {
 
   ENTITY_DAMAGE = 20,
   ENTITY_DESTROY = 21,
+
+  ENEMY_INTENT_CHANGE = 30,
 };
 
 enum class BattleEntityDestroyReason {
@@ -225,10 +249,19 @@ struct BattleEventDTO {
                                                 entityType, destroyReason)
   };
 
+  struct IntentParameter {
+    int enemyEntityId = 0;
+    BattleEnemyIntent intent = BattleEnemyIntent::IDLE;
+    std::string targetPlayerUid;
+    NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(IntentParameter, enemyEntityId,
+                                                intent, targetPlayerUid)
+  };
+
   std::optional<SpawnParameter> spawnParameter;
   std::optional<HitParameter> hitParameter;
   std::optional<DamageParameter> damageParameter;
   std::optional<DestroyParameter> destroyParameter;
+  std::optional<IntentParameter> intentParameter;
 };
 inline void to_json(json &j, const BattleEventDTO &e) {
   j["eventType"] = e.eventType;
@@ -241,10 +274,17 @@ inline void to_json(json &j, const BattleEventDTO &e) {
       e.damageParameter ? json(e.damageParameter.value()) : json(nullptr);
   j["destroyParameter"] =
       e.destroyParameter ? json(e.destroyParameter.value()) : json(nullptr);
+  j["intentParameter"] =
+      e.intentParameter ? json(e.intentParameter.value()) : json(nullptr);
 }
 inline void from_json(const json &j, BattleEventDTO &e) {
   j.at("eventType").get_to(e.eventType);
   j.at("eventTick").get_to(e.eventTick);
+  e.spawnParameter.reset();
+  e.hitParameter.reset();
+  e.damageParameter.reset();
+  e.destroyParameter.reset();
+  e.intentParameter.reset();
   if (j.contains("spawnParameter") && !j["spawnParameter"].is_null())
     e.spawnParameter =
         j["spawnParameter"].get<BattleEventDTO::SpawnParameter>();
@@ -256,6 +296,9 @@ inline void from_json(const json &j, BattleEventDTO &e) {
   if (j.contains("destroyParameter") && !j["destroyParameter"].is_null())
     e.destroyParameter =
         j["destroyParameter"].get<BattleEventDTO::DestroyParameter>();
+  if (j.contains("intentParameter") && !j["intentParameter"].is_null())
+    e.intentParameter =
+        j["intentParameter"].get<BattleEventDTO::IntentParameter>();
 }
 
 struct BattleWaitRsp {

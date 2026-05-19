@@ -62,7 +62,7 @@ classDiagram
         +map_init(req, rsp)
         +map_move(req, rsp)
         +battle_player_ready(req, rsp)
-        +battle_player_move(req, rsp)
+        +battle_sync(req, rsp)
         +battle_player_shoot(req, rsp)
     }
 
@@ -107,7 +107,7 @@ classDiagram
         +get_map_init(rsp)
         +move_map(uid, selectId, selectStatus, committed)
         +set_battle_ready(uid, rsp, allReady)
-        +move_battle_player(uid, input)
+        +sync_battle(uid, playerPosition, playerDirection, enemyPositions)
         +shoot_battle_player(uid, direction)
         +tick_battle(frame)
     }
@@ -266,11 +266,12 @@ classDiagram
   - 广播 `BATTLE_FRAME`
   - `pushMessages = [BATTLE_START]`
 
-`PLAYER_MOVE` 行为：
+`BATTLE_SYNC` 行为：
 
-- 请求只更新玩家当前输入方向
-- 实际位移在 `Room::tick_battle()` 中按帧执行
-- 速度取自 `BattlePlayerAttribute::velocity`，当前默认值为 `0.25`
+- 请求上报客户端实际玩家位置、玩家方向和本地计算出的怪物位置
+- 玩家位置以最新合法上报为准
+- 怪物位置在 `Room::tick_battle()` 中按实体聚合，各客户端同一 tick 内最新上报取均值
+- 未知怪物或非有限坐标会被忽略
 
 `PLAYER_SHOOT` 行为：
 

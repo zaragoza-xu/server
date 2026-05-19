@@ -8,7 +8,7 @@
 - 大厅域：`EDIT_PROFILE`、`CREATE_ROOM`、`JOIN_ROOM`、`LEAVE_ROOM`、`LIST_ROOMS`、`SET_READY`
 - 商店域：`SHOP_INIT`、`SHOP_MOVE_CURSOR`、`SHOP_BUY`
 - 地图域：`MAP_INIT`、`MAP_MOVE`
-- 战斗域：`PLAYER_READY`、`PLAYER_MOVE`、`PLAYER_SHOOT`
+- 战斗域：`PLAYER_READY`、`BATTLE_SYNC`、`PLAYER_SHOOT`
 - 响应分为 `ShortEnvelope` 和 `LongEnvelope`
 - 运行时配置来自 `config/server.json`，商店目录来自 `config/shop_catalog.json`
 
@@ -78,7 +78,7 @@
 战斗域：
 
 - `BattleRequestType::PLAYER_READY = 0`
-- `BattleRequestType::PLAYER_MOVE = 1`
+- `BattleRequestType::BATTLE_SYNC = 1`
 - `BattleRequestType::PLAYER_SHOOT = 2`
 - `BattleResponseType::BATTLE_WAIT = 0`
 - `BattleResponseType::BATTLE_FRAME = 1`
@@ -148,8 +148,8 @@
 战斗帧同步：
 
 - `BattleServer` 每 16ms 扫描房间并广播 `BATTLE_FRAME`
-- `PLAYER_MOVE` 只记录输入方向
-- 玩家坐标在 `tick_battle()` 中按帧更新，速度来自 `BattlePlayerAttribute::velocity`
+- `BATTLE_SYNC` 接收客户端实际玩家位置和本地计算的怪物位置
+- 玩家位置以客户端最新上报为准；怪物位置在 `tick_battle()` 中按实体取各客户端最新上报的均值
 
 ### 5. 当前阶段行为补充
 
@@ -341,10 +341,10 @@ cmake --build --preset debug --target collision_demo collision_detection_tests
 {"type":0,"uid":"1001","maximumPeople":4}
 ```
 
-战斗移动：
+战斗同步：
 
 ```json
-{"type":1,"uid":"1001","input":{"x":1.0,"y":0.0}}
+{"type":1,"uid":"1001","playerPosition":{"x":1.0,"y":0.0},"playerDirection":{"x":1.0,"y":0.0},"enemyPositions":[{"entityId":2,"position":{"x":4.0,"y":5.0},"direction":{"x":0.0,"y":-1.0}}]}
 ```
 
 使用 `nc` 快速调试时，每条 JSON 后必须换行：

@@ -120,8 +120,7 @@ public:
   int map_move(const Protocol::MapMoveReq &, Protocol::NoResponseRsp &);
   int battle_player_ready(const Protocol::BattlePlayerReadyReq &,
                           Protocol::NoResponseRsp &);
-  int battle_player_move(const Protocol::BattlePlayerMoveReq &,
-                         Protocol::NoResponseRsp &);
+  int battle_sync(const Protocol::BattleSyncReq &, Protocol::NoResponseRsp &);
   int battle_player_shoot(const Protocol::BattlePlayerShootReq &,
                           Protocol::NoResponseRsp &);
   int list_rooms(const Protocol::ListRoomsReq &, Protocol::ListRoomsRsp &);
@@ -296,10 +295,10 @@ private:
        &Server::dispatch_entry_long<Protocol::BattlePlayerReadyReq,
                                     Protocol::NoResponseRsp,
                                     &Server::battle_player_ready>},
-      {Protocol::BattleRequestType::PLAYER_MOVE,
-       &Server::dispatch_entry_long<Protocol::BattlePlayerMoveReq,
+      {Protocol::BattleRequestType::BATTLE_SYNC,
+       &Server::dispatch_entry_long<Protocol::BattleSyncReq,
                                     Protocol::NoResponseRsp,
-                                    &Server::battle_player_move>},
+                                    &Server::battle_sync>},
       {Protocol::BattleRequestType::PLAYER_SHOOT,
        &Server::dispatch_entry_long<Protocol::BattlePlayerShootReq,
                                     Protocol::NoResponseRsp,
