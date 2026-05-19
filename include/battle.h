@@ -125,7 +125,7 @@ inline void from_json(const json &j, BattleEnemyEntity &e) {
 
 enum class BattleRequestType {
   PLAYER_READY = 0,
-  PLAYER_MOVE = 1,
+  BATTLE_SYNC = 1,
   PLAYER_SHOOT = 2,
   ERROR = 100,
 };
@@ -146,12 +146,24 @@ struct BattlePlayerReadyReq {
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(BattlePlayerReadyReq, type, uid)
 };
 
-struct BattlePlayerMoveReq {
+struct BattlePos {
+  int entityId = 0;
+  BattleVector2 position;
+  BattleVector2 direction;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(BattlePos, entityId, position,
+                                              direction)
+};
+
+struct BattleSyncReq {
   BattleRequestType type;
   std::string uid;
-  BattleVector2 input;
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(BattlePlayerMoveReq, type, uid,
-                                              input)
+  BattleVector2 playerPosition;
+  BattleVector2 playerDirection;
+  std::vector<BattlePos> enemyPositions;
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(BattleSyncReq, type, uid,
+                                              playerPosition, playerDirection,
+                                              enemyPositions)
 };
 
 struct BattlePlayerShootReq {

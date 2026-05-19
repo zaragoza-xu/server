@@ -13,6 +13,10 @@ double distance_squared(const Protocol::BattleVector2 &lhs,
   const double dy = lhs.y - rhs.y;
   return dx * dx + dy * dy;
 }
+
+bool is_valid_vector(const Protocol::BattleVector2 &value) {
+  return std::isfinite(value.x) && std::isfinite(value.y);
+}
 } // namespace
 
 void Room::reset_battle_state_locked() {
@@ -21,6 +25,7 @@ void Room::reset_battle_state_locked() {
   nextBattleEntityId = 1;
   battlePlayersByUid.clear();
   battleEnemyStates.clear();
+  enemyPosByUid.clear();
   battleBullets.clear();
   pendingBattleEvents.clear();
   for (const auto &uid : uids) {
@@ -112,6 +117,47 @@ void Room::spawn_enemies_locked(const std::vector<EnemySpawnSpec> &spawnPlan) {
 
     battleEnemyStates.push_back(std::move(enemyState));
   }
+}
+
+bool Room::has_enemy_locked(int entityId) const {
+  return std::any_of(battleEnemyStates.begin(), battleEnemyStates.end(),
+                     [entityId](const BattleEnemyState &enemyState) {
+                       return enemyState.entity.entityId == entityId;
+                     });
+}
+
+void Room::apply_enemy_reports_locked() {
+  for (auto &enemyState : battleEnemyStates) {
+    double x = 0.0;
+    double y = 0.0;
+    double dx = 0.0;
+    double dy = 0.0;
+    int count = 0;
+
+    for (const auto &[uid, enemyById] : enemyPosByUid) {
+      const auto reportIt = enemyById.find(enemyState.entity.entityId);
+      if (reportIt == enemyById.end()) {
+        continue;
+      }
+      const auto &report = reportIt->second;
+      x += report.position.x;
+      y += report.position.y;
+      dx += report.direction.x;
+      dy += report.direction.y;
+      ++count;
+    }
+
+    if (count == 0) {
+      continue;
+    }
+
+    enemyState.entity.position.x = x / count;
+    enemyState.entity.position.y = y / count;
+    enemyState.entity.direction.x = dx / count;
+    enemyState.entity.direction.y = dy / count;
+  }
+
+  enemyPosByUid.clear();
 }
 
 bool Room::update_enemy_intent_locked(BattleEnemyState &enemyState) {
@@ -216,8 +262,10 @@ bool Room::set_battle_ready(const std::string &uid,
   return true;
 }
 
-bool Room::move_battle_player(const std::string &uid,
-                              const Protocol::BattleVector2 &input) {
+bool Room::sync_battle(const std::string &uid,
+                       const Protocol::BattleVector2 &playerPosition,
+                       const Protocol::BattleVector2 &playerDirection,
+                       const std::vector<Protocol::BattlePos> &enemyPositions) {
   std::lock_guard<std::mutex> lock(roomMutex);
   if (!battleStarted) {
     return false;
@@ -227,7 +275,20 @@ bool Room::move_battle_player(const std::string &uid,
     return false;
   }
 
-  it->second.direction = input;
+  if (is_valid_vector(playerPosition) && is_valid_vector(playerDirection)) {
+    it->second.position = playerPosition;
+    it->second.direction = playerDirection;
+  }
+
+  auto &enemyById = enemyPosByUid[uid];
+  for (const auto &enemyPosition : enemyPositions) {
+    if (!has_enemy_locked(enemyPosition.entityId) ||
+        !is_valid_vector(enemyPosition.position) ||
+        !is_valid_vector(enemyPosition.direction)) {
+      continue;
+    }
+    enemyById[enemyPosition.entityId] = enemyPosition;
+  }
   return true;
 }
 
@@ -241,8 +302,6 @@ bool Room::shoot_battle_player(const std::string &uid,
   if (playerIt == battlePlayersByUid.end()) {
     return false;
   }
-
-  playerIt->second.direction = direction;
 
   Protocol::BattleBulletEntity bullet;
   bullet.entityId = nextBattleEntityId++;
@@ -271,15 +330,7 @@ bool Room::tick_battle(Protocol::BattleFrameRsp &frame) {
 
   ++battleTick;
 
-  for (auto &[uid, player] : battlePlayersByUid) {
-    const auto &dir = player.direction;
-    double len = std::sqrt(dir.x * dir.x + dir.y * dir.y);
-    if (len > 1e-18) {
-      double speed = player.attribute.velocity;
-      player.position.x += (dir.x / len) * speed;
-      player.position.y += (dir.y / len) * speed;
-    }
-  }
+  apply_enemy_reports_locked();
 
   for (auto &bullet : battleBullets) {
     bullet.position.x += bullet.direction.x;

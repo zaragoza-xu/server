@@ -35,17 +35,25 @@ private:
   size_t maximumPeople;
   std::vector<std::string> uids;
   std::unordered_map<std::string, bool> readyStates;
+
+  // shop info
   std::vector<std::string> shopItemIds;
   std::string shopCatalogVersion;
   std::unordered_set<std::string> takenItems;
   std::unordered_map<std::string, std::string> selectedItemByUid;
   std::unordered_map<std::string, std::vector<std::string>> ownedItemsByUid;
+
+  // map info
   std::vector<Protocol::MapNode> mapNodes;
   std::unordered_map<std::string, int> selectedMapNodeByUid;
+
+  // battle info
   std::unordered_map<std::string, bool> battleReadyStates;
   std::unordered_map<std::string, Protocol::BattlePlayerEntity>
       battlePlayersByUid;
   std::vector<BattleEnemyState> battleEnemyStates;
+  std::unordered_map<std::string, std::unordered_map<int, Protocol::BattlePos>>
+      enemyPosByUid;
   std::vector<Protocol::BattleBulletEntity> battleBullets;
   std::vector<Protocol::BattleEventDTO> pendingBattleEvents;
   int battleTick = 0;
@@ -64,6 +72,8 @@ private:
   std::vector<EnemySpawnSpec>
   build_spawn_plan_locked(Protocol::MapNode::NodeType nodeType) const;
   void spawn_enemies_locked(const std::vector<EnemySpawnSpec> &spawnPlan);
+  bool has_enemy_locked(int entityId) const;
+  void apply_enemy_reports_locked();
   bool update_enemy_intent_locked(BattleEnemyState &enemyState);
   void push_enemy_intent_locked(const BattleEnemyState &enemyState);
   void start_battle_locked();
@@ -93,8 +103,10 @@ public:
                 std::vector<Protocol::MapSync> &selectStatus, bool &committed);
   bool set_battle_ready(const std::string &uid, Protocol::BattleWaitRsp &rsp,
                         bool &allReady);
-  bool move_battle_player(const std::string &uid,
-                          const Protocol::BattleVector2 &input);
+  bool sync_battle(const std::string &uid,
+                   const Protocol::BattleVector2 &playerPosition,
+                   const Protocol::BattleVector2 &playerDirection,
+                   const std::vector<Protocol::BattlePos> &enemyPositions);
   bool shoot_battle_player(const std::string &uid,
                            const Protocol::BattleVector2 &direction);
   bool tick_battle(Protocol::BattleFrameRsp &frame);
@@ -127,6 +139,7 @@ public:
     readyStates.erase(uid);
     battleReadyStates.erase(uid);
     battlePlayersByUid.erase(uid);
+    enemyPosByUid.erase(uid);
     selectedItemByUid.erase(uid);
     selectedMapNodeByUid.erase(uid);
     ownedItemsByUid.erase(uid);

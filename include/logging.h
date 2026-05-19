@@ -90,8 +90,8 @@ inline std::string_view request_type_name(Protocol::BattleRequestType type) {
   switch (type) {
   case Protocol::BattleRequestType::PLAYER_READY:
     return "PLAYER_READY";
-  case Protocol::BattleRequestType::PLAYER_MOVE:
-    return "PLAYER_MOVE";
+  case Protocol::BattleRequestType::BATTLE_SYNC:
+    return "BATTLE_SYNC";
   case Protocol::BattleRequestType::PLAYER_SHOOT:
     return "PLAYER_SHOOT";
   case Protocol::BattleRequestType::ERROR:

@@ -109,8 +109,8 @@ int Server::battle_player_ready(const Protocol::BattlePlayerReadyReq &req,
   return Protocol::SERVICE_SUCCESS;
 }
 
-int Server::battle_player_move(const Protocol::BattlePlayerMoveReq &req,
-                               Protocol::NoResponseRsp &) {
+int Server::battle_sync(const Protocol::BattleSyncReq &req,
+                        Protocol::NoResponseRsp &) {
   std::scoped_lock lock(state->usersMutex, state->roomsMutex);
 
   std::shared_ptr<User> member;
@@ -120,7 +120,8 @@ int Server::battle_player_move(const Protocol::BattlePlayerMoveReq &req,
     return resolveCode;
   }
 
-  if (!room->move_battle_player(req.uid, req.input)) {
+  if (!room->sync_battle(req.uid, req.playerPosition, req.playerDirection,
+                         req.enemyPositions)) {
     return Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR;
   }
   return Protocol::SERVICE_SUCCESS;
