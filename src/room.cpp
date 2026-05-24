@@ -33,6 +33,18 @@ int Room::get_map_node_index(int nodeId) const {
   return static_cast<int>(std::distance(mapNodes.begin(), it));
 }
 
+bool Room::all_lobby_ready_locked() const {
+  return !readyStates.empty() &&
+         std::all_of(readyStates.begin(), readyStates.end(),
+                     [](const auto &kv) { return kv.second; });
+}
+
+bool Room::is_last_map_node_locked() const {
+  const int nodeIndex = get_map_node_index(mapNodeId);
+  return nodeIndex >= 0 &&
+         mapNodes[static_cast<size_t>(nodeIndex)].nextId.empty();
+}
+
 void Room::ensure_map_generated_locked() {
   if (!mapNodes.empty()) {
     return;
@@ -125,6 +137,9 @@ Protocol::RoomInfo Room::get_info() const {
 
 bool Room::add_member(std::shared_ptr<User> user) {
   std::lock_guard<std::mutex> lock(roomMutex);
+  if (phase != Phase::LOBBY) {
+    return false;
+  }
   const auto &uid = user->get_uid();
   if (std::find(uids.begin(), uids.end(), uid) != uids.end()) {
     return false; // Already in room
@@ -135,6 +150,22 @@ bool Room::add_member(std::shared_ptr<User> user) {
   readyStates.emplace(uid, false);
   battleReadyStates.emplace(uid, false);
   ownedItemsByUid.emplace(uid, std::vector<std::string>{});
+  return true;
+}
+
+bool Room::set_member_ready(const std::string &uid, bool ready) {
+  std::lock_guard<std::mutex> lock(roomMutex);
+  if (phase != Phase::LOBBY) {
+    return false;
+  }
+  auto it = readyStates.find(uid);
+  if (it == readyStates.end()) {
+    return false;
+  }
+  it->second = ready;
+  if (all_lobby_ready_locked()) {
+    phase = Phase::SHOP;
+  }
   return true;
 }
 
@@ -175,6 +206,9 @@ bool Room::get_shop_init(Protocol::ShopInitRsp &rsp) const {
   }
 
   std::scoped_lock lock(roomMutex, shared_state->userDataMutex);
+  if (phase != Phase::SHOP) {
+    return false;
+  }
   rsp.items = build_shop_items_locked(uids.size());
   rsp.playerInfos.clear();
   rsp.playerInfos.reserve(uids.size());
@@ -195,22 +229,28 @@ bool Room::get_shop_init(Protocol::ShopInitRsp &rsp) const {
   return true;
 }
 
-bool Room::move_shop_cursor(const std::string &uid, const std::string &itemId,
-                            std::vector<Protocol::ShopItem> &items) {
+int Room::move_shop_cursor(const std::string &uid, const std::string &itemId,
+                           std::vector<Protocol::ShopItem> &items) {
   std::lock_guard<std::mutex> lock(roomMutex);
+  if (phase != Phase::SHOP) {
+    return Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR;
+  }
   if (get_item_index(itemId) < 0) {
     selectedItemByUid.erase(uid);
     items = build_shop_items_locked(uids.size());
-    return true; // Invalid itemId is treated as deselection, not an error
+    return Protocol::SERVICE_SUCCESS; // Invalid itemId deselects.
   }
   selectedItemByUid[uid] = itemId;
   items = build_shop_items_locked(uids.size());
-  return true;
+  return Protocol::SERVICE_SUCCESS;
 }
 
 int Room::buy_shop_item(const std::string &uid, const std::string &itemId,
                         std::vector<Protocol::ShopItem> &items) {
   std::lock_guard<std::mutex> lock(roomMutex);
+  if (phase != Phase::SHOP) {
+    return Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR;
+  }
   if (get_item_index(itemId) < 0) {
     return Protocol::SERVICE_FAIL | Protocol::SHOP_INVALID_ITEM;
   }
@@ -234,7 +274,13 @@ int Room::buy_shop_item(const std::string &uid, const std::string &itemId,
 
 bool Room::get_map_init(Protocol::MapInitRsp &rsp) {
   std::lock_guard<std::mutex> lock(roomMutex);
+  if (phase != Phase::SHOP && phase != Phase::MAP) {
+    return false;
+  }
   ensure_map_generated_locked();
+  if (phase == Phase::SHOP) {
+    phase = Phase::MAP;
+  }
   rsp.map = mapNodes;
   return !rsp.map.empty();
 }
@@ -243,6 +289,9 @@ bool Room::move_map(const std::string &uid, int selectId,
                     std::vector<Protocol::MapSync> &selectStatus,
                     bool &committed) {
   std::lock_guard<std::mutex> lock(roomMutex);
+  if (phase != Phase::MAP) {
+    return false;
+  }
   ensure_map_generated_locked();
   committed = false;
 

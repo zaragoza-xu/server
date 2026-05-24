@@ -1,6 +1,10 @@
 #pragma once
 
+#include <memory>
 #include <string>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -67,6 +71,90 @@ inline void lobby_join_room(MultiServiceHarness &harness,
   EXPECT_EQ(rsp.at("code"), Protocol::SERVICE_SUCCESS);
 }
 
+inline void lobby_ready(MultiServiceHarness &harness, const std::string &uid) {
+  auto client = harness.make_lobby_client();
+  client->send_json(
+      json{{"type", static_cast<int>(Protocol::HomeRequestType::SET_READY)},
+           {"uid", uid},
+           {"ready", true}});
+  const json rsp = client->read_json();
+  EXPECT_EQ(rsp.at("type").get<int>(),
+            static_cast<int>(Protocol::HomeRequestType::BROADCAST));
+}
+
+inline int map_first_root(const json &mapArr) {
+  std::unordered_set<int> incoming;
+  for (const auto &node : mapArr) {
+    if (!node.contains("nextId") || !node.at("nextId").is_array()) {
+      continue;
+    }
+    for (const auto &nid : node.at("nextId")) {
+      if (nid.is_number_integer()) {
+        incoming.insert(nid.get<int>());
+      }
+    }
+  }
+
+  for (const auto &node : mapArr) {
+    const int nodeId = node.at("nodeId").get<int>();
+    if (incoming.count(nodeId) == 0) {
+      return nodeId;
+    }
+  }
+  return -1;
+}
+
+inline void select_first_map_node(MultiServiceHarness &harness, int roomId,
+                                  const std::vector<std::string> &uids) {
+  ASSERT_FALSE(uids.empty());
+
+  struct MapClient {
+    std::string uid;
+    std::shared_ptr<FakeClient> client;
+  };
+
+  std::vector<MapClient> clients;
+  clients.reserve(uids.size());
+  int rootSelectId = -1;
+
+  for (const auto &uid : uids) {
+    auto client = harness.make_map_client();
+    client->send_json(
+        json{{"type", static_cast<int>(Protocol::MapRequestType::MAP_INIT)},
+             {"roomId", roomId},
+             {"uid", uid}});
+    const json initLine = client->read_json();
+    ASSERT_EQ(initLine.at("type").get<int>(),
+              static_cast<int>(Protocol::MapRequestType::MAP_INIT));
+    if (rootSelectId < 0) {
+      rootSelectId = map_first_root(initLine.at("data").at("map"));
+    }
+    clients.push_back(MapClient{uid, std::move(client)});
+  }
+
+  ASSERT_NE(rootSelectId, -1);
+
+  for (const auto &sender : clients) {
+    sender.client->send_json(
+        json{{"type", static_cast<int>(Protocol::MapRequestType::MAP_MOVE)},
+             {"uid", sender.uid},
+             {"selectId", rootSelectId}});
+    for (const auto &bound : clients) {
+      const json movePush = bound.client->read_json();
+      EXPECT_EQ(movePush.at("type").get<int>(),
+                static_cast<int>(Protocol::MapRequestType::MAP_MOVE));
+    }
+  }
+}
+
+inline void enter_map(MultiServiceHarness &harness, int roomId,
+                      const std::vector<std::string> &uids) {
+  for (const auto &uid : uids) {
+    lobby_ready(harness, uid);
+  }
+  select_first_map_node(harness, roomId, uids);
+}
+
 inline void auth_logout(MultiServiceHarness &harness,
                         const std::string &uid) {
   auto client = harness.make_auth_client();
@@ -89,4 +177,3 @@ inline void lobby_leave_room(MultiServiceHarness &harness,
 }
 
 } // namespace network_tests
-

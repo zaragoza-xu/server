@@ -85,7 +85,11 @@ void Room::reset_battle_state_locked() {
   }
 }
 
-void Room::end_battle_locked() { reset_battle_state_locked(); }
+void Room::end_battle_locked(bool won) {
+  const bool runEnded = !won || is_last_map_node_locked();
+  reset_battle_state_locked();
+  phase = runEnded ? Phase::END : Phase::MAP;
+}
 
 Protocol::BattleFrameRsp Room::build_battle_frame_locked() const {
   Protocol::BattleFrameRsp frame;
@@ -400,6 +404,7 @@ void Room::push_enemy_intent_locked(const BattleEnemyState &enemyState) {
 
 void Room::start_battle_locked() {
   reset_battle_state_locked();
+  phase = Phase::BATTLE;
   battleStarted = true;
 
   int spawnIndex = 0;
@@ -430,6 +435,9 @@ void Room::start_battle_locked() {
 bool Room::set_battle_ready(const std::string &uid,
                             Protocol::BattleWaitRsp &rsp, bool &allReady) {
   std::lock_guard<std::mutex> lock(roomMutex);
+  if (phase != Phase::MAP || mapNodeId < 0) {
+    return false;
+  }
   auto it = battleReadyStates.find(uid);
   if (it == battleReadyStates.end()) {
     return false;
@@ -443,7 +451,7 @@ bool Room::set_battle_ready(const std::string &uid,
                     [](const auto &entry) { return entry.second; }));
 
   allReady = rsp.totalCount > 0 && rsp.readyCount == rsp.totalCount;
-  if (allReady && !battleStarted) {
+  if (allReady) {
     start_battle_locked();
   }
   return true;
@@ -454,18 +462,17 @@ bool Room::sync_battle(const std::string &uid,
                        const Protocol::BattleVector2 &playerDirection,
                        const std::vector<Protocol::BattlePos> &enemyPositions) {
   std::lock_guard<std::mutex> lock(roomMutex);
-  if (!battleStarted) {
-    return false;
-  }
-  auto it = battlePlayersByUid.find(uid);
-  if (it == battlePlayersByUid.end()) {
+  if (phase != Phase::BATTLE || !battleStarted) {
     return false;
   }
 
-  if (it->second.attribute.currentHP > 0 && is_valid_vector(playerPosition) &&
-      is_valid_vector(playerDirection)) {
-    it->second.position = clamp_battle(playerPosition);
-    it->second.direction = playerDirection;
+  auto *player = live_player_locked(uid);
+  if (player == nullptr) {
+    return false;
+  }
+  if (is_valid_vector(playerPosition) && is_valid_vector(playerDirection)) {
+    player->position = clamp_battle(playerPosition);
+    player->direction = playerDirection;
   }
 
   auto &enemyById = enemyPosByUid[uid];
@@ -486,7 +493,7 @@ bool Room::sync_battle(const std::string &uid,
 bool Room::shoot_battle_player(const std::string &uid,
                                const Protocol::BattleVector2 &direction) {
   std::lock_guard<std::mutex> lock(roomMutex);
-  if (!battleStarted) {
+  if (phase != Phase::BATTLE || !battleStarted) {
     return false;
   }
   auto *player = live_player_locked(uid);
@@ -525,7 +532,7 @@ bool Room::tick_battle(Protocol::BattleFrameRsp &frame, bool *ended) {
   if (ended != nullptr) {
     *ended = false;
   }
-  if (!battleStarted) {
+  if (phase != Phase::BATTLE || !battleStarted) {
     return false;
   }
 
@@ -535,7 +542,8 @@ bool Room::tick_battle(Protocol::BattleFrameRsp &frame, bool *ended) {
 
   tick_bullets_locked();
 
-  bool battleEnded = battleEnemyStates.empty();
+  bool battleWon = battleEnemyStates.empty();
+  bool battleEnded = battleWon;
 
   if (!battleEnded) {
     std::vector<std::pair<int, std::string>> oldTargets;
@@ -568,13 +576,14 @@ bool Room::tick_battle(Protocol::BattleFrameRsp &frame, bool *ended) {
     }
     if (all_players_dead_locked()) {
       battleEnded = true;
+      battleWon = false;
     }
   }
 
   frame = build_battle_frame_locked();
   pendingBattleEvents.clear();
   if (battleEnded) {
-    end_battle_locked();
+    end_battle_locked(battleWon);
     if (ended != nullptr) {
       *ended = true;
     }

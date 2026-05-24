@@ -1,5 +1,4 @@
 #include <string>
-#include <unordered_set>
 
 #include <gtest/gtest.h>
 
@@ -15,6 +14,7 @@ TEST(MapNetworkTest, MapServer_InitAndMovePush) {
   const std::string uid =
       network_tests::auth_register_login(harness);
   const int roomId = network_tests::lobby_create_room(harness, uid, 1);
+  network_tests::lobby_ready(harness, uid);
 
   auto mapClient = harness.make_map_client();
   mapClient->send_json(
@@ -31,29 +31,7 @@ TEST(MapNetworkTest, MapServer_InitAndMovePush) {
   ASSERT_FALSE(mapArr.empty());
   ASSERT_FALSE(mapArr.at(0).at("nextId").empty());
 
-  // The first MAP_MOVE must select a root node (no incoming edges). See
-  // Room::move_map: when mapNodeId < 0, it rejects nodes that appear in any
-  // other node's `nextId`.
-  std::unordered_set<int> incoming;
-  for (const auto &node : mapArr) {
-    if (!node.contains("nextId") || !node.at("nextId").is_array()) {
-      continue;
-    }
-    for (const auto &nid : node.at("nextId")) {
-      if (nid.is_number_integer()) {
-        incoming.insert(nid.get<int>());
-      }
-    }
-  }
-
-  int rootSelectId = -1;
-  for (const auto &node : mapArr) {
-    const int nodeId = node.at("nodeId").get<int>();
-    if (incoming.count(nodeId) == 0) {
-      rootSelectId = nodeId;
-      break;
-    }
-  }
+  const int rootSelectId = network_tests::map_first_root(mapArr);
   ASSERT_NE(rootSelectId, -1);
 
   // MAP_MOVE is NoResponseRsp, so we expect the broadcast push.
@@ -99,6 +77,7 @@ TEST(MapNetworkTest, MapMoveWithUnknownNodeReturnsRoomStateError) {
   network_tests::MultiServiceHarness harness;
   const std::string uid = network_tests::auth_register_login(harness);
   const int roomId = network_tests::lobby_create_room(harness, uid, 1);
+  network_tests::lobby_ready(harness, uid);
 
   auto mapClient = harness.make_map_client();
   mapClient->send_json(
@@ -119,4 +98,3 @@ TEST(MapNetworkTest, MapMoveWithUnknownNodeReturnsRoomStateError) {
 }
 
 } // namespace
-

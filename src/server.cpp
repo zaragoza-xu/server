@@ -438,8 +438,9 @@ int Server::shop_move_cursor(const Protocol::ShopMoveCursorReq &req,
       return resolve_code;
     }
 
-    if (!room->move_shop_cursor(req.uid, req.itemId, items)) {
-      return Protocol::SERVICE_FAIL | Protocol::SHOP_INVALID_ITEM;
+    const int move_code = room->move_shop_cursor(req.uid, req.itemId, items);
+    if (move_code != Protocol::SERVICE_SUCCESS) {
+      return move_code;
     }
     member_uids = room->get_member_uids();
   }

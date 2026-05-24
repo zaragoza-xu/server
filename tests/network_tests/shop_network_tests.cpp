@@ -14,6 +14,7 @@ TEST(ShopNetworkTest, ShopServer_InitLongEnvelopeAndMoveCursorPush) {
   const std::string uid =
       network_tests::auth_register_login(harness);
   network_tests::lobby_create_room(harness, uid, 2);
+  network_tests::lobby_ready(harness, uid);
 
   auto shop = harness.make_shop_client();
   shop->send_json(
@@ -77,6 +78,8 @@ TEST(ShopNetworkTest,
   const std::string bob = network_tests::auth_register_login(harness);
   const int roomId = network_tests::lobby_create_room(harness, alice, 2);
   network_tests::lobby_join_room(harness, roomId, bob);
+  network_tests::lobby_ready(harness, alice);
+  network_tests::lobby_ready(harness, bob);
 
   auto shop = harness.make_shop_client();
   shop->send_json(
@@ -99,6 +102,7 @@ TEST(ShopNetworkTest, ShopBuyInvalidItemReturnsShopInvalidItem) {
   network_tests::MultiServiceHarness harness;
   const std::string uid = network_tests::auth_register_login(harness);
   network_tests::lobby_create_room(harness, uid, 2);
+  network_tests::lobby_ready(harness, uid);
 
   auto shop = harness.make_shop_client();
   shop->send_json(
@@ -116,6 +120,8 @@ TEST(ShopNetworkTest, ShopBuyAfterPeerBuysReturnsItemTaken) {
   const std::string bob = network_tests::auth_register_login(harness);
   const int roomId = network_tests::lobby_create_room(harness, alice, 2);
   network_tests::lobby_join_room(harness, roomId, bob);
+  network_tests::lobby_ready(harness, alice);
+  network_tests::lobby_ready(harness, bob);
 
   auto shopAlice = harness.make_shop_client();
   shopAlice->send_json(
@@ -146,4 +152,3 @@ TEST(ShopNetworkTest, ShopBuyAfterPeerBuysReturnsItemTaken) {
 }
 
 } // namespace
-

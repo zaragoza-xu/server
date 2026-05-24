@@ -240,6 +240,22 @@ TEST_F(ServerChannelBehaviorTest, ShopFlowBehavior) {
           joinRsp),
       Protocol::SERVICE_SUCCESS);
 
+  Protocol::NoResponseRsp readyRsp;
+  ASSERT_EQ(
+      server->set_ready(
+          Protocol::SetReadyReq{.type = Protocol::HomeRequestType::SET_READY,
+                                .uid = aliceUid,
+                                .ready = true},
+          readyRsp),
+      Protocol::SERVICE_SUCCESS);
+  ASSERT_EQ(
+      server->set_ready(
+          Protocol::SetReadyReq{.type = Protocol::HomeRequestType::SET_READY,
+                                .uid = bobUid,
+                                .ready = true},
+          readyRsp),
+      Protocol::SERVICE_SUCCESS);
+
   Protocol::ShopInitRsp initRsp;
   ASSERT_EQ(
       server->shop_init(

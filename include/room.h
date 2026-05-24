@@ -40,8 +40,11 @@ private:
     int maxHP = 10;
   };
 
+  enum class Phase { LOBBY, SHOP, MAP, BATTLE, END };
+
   std::weak_ptr<ServerState> state;
   int roomId;
+  Phase phase = Phase::LOBBY;
   int mapNodeId = -1;
   size_t maximumPeople;
   std::vector<std::string> uids;
@@ -109,6 +112,8 @@ private:
 
   int get_item_index(const std::string &itemId) const;
   int get_map_node_index(int nodeId) const;
+  bool all_lobby_ready_locked() const;
+  bool is_last_map_node_locked() const;
   void ensure_map_generated_locked();
   bool try_commit_map_move_locked();
   std::vector<Protocol::ShopItem> build_shop_items_locked(const size_t) const;
@@ -124,7 +129,7 @@ private:
   void apply_enemy_reports_locked();
   void tick_bullets_locked();
   void tick_enemy_attacks_locked();
-  void end_battle_locked();
+  void end_battle_locked(bool won);
   bool update_target_locked(BattleEnemyState &enemyState);
   void push_enemy_intent_locked(const BattleEnemyState &enemyState);
   void start_battle_locked();
@@ -145,8 +150,8 @@ public:
   bool add_member(std::shared_ptr<User> user);
 
   bool get_shop_init(Protocol::ShopInitRsp &rsp) const;
-  bool move_shop_cursor(const std::string &uid, const std::string &itemId,
-                        std::vector<Protocol::ShopItem> &items);
+  int move_shop_cursor(const std::string &uid, const std::string &itemId,
+                       std::vector<Protocol::ShopItem> &items);
   int buy_shop_item(const std::string &uid, const std::string &itemId,
                     std::vector<Protocol::ShopItem> &items);
   bool get_map_init(Protocol::MapInitRsp &rsp);
@@ -162,15 +167,7 @@ public:
                            const Protocol::BattleVector2 &direction);
   bool tick_battle(Protocol::BattleFrameRsp &frame, bool *ended = nullptr);
 
-  bool set_member_ready(const std::string &uid, bool ready) {
-    std::lock_guard<std::mutex> lock(roomMutex);
-    auto it = readyStates.find(uid);
-    if (it == readyStates.end()) {
-      return false;
-    }
-    it->second = ready;
-    return true;
-  }
+  bool set_member_ready(const std::string &uid, bool ready);
 
   bool is_all_ready() const {
     std::lock_guard<std::mutex> lock(roomMutex);

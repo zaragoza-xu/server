@@ -24,6 +24,7 @@
 - 大厅域：`CREATE_ROOM`、`JOIN_ROOM`、`LEAVE_ROOM`、`LIST_ROOMS`
 - 商店域：`SHOP_INIT`、`SHOP_MOVE_CURSOR`、`SHOP_BUY`
 - 地图域：`MAP_INIT`、`MAP_MOVE`
+- 战斗域：`PLAYER_READY`、`BATTLE_SYNC`、`PLAYER_SHOOT`
 
 ### 1.2 快照断言（每个命令都要有）
 
@@ -97,29 +98,52 @@
 
 ## 4. 阶段行为测试（P0-P1，高优先）
 
-### 4.1 商店阶段
+### 4.1 阶段状态机
+
+- 新建房间初始处于 `LOBBY`。
+- `JOIN_ROOM` 只在 `LOBBY` 阶段成功；进入后续阶段后加入应返回 `ROOM_STATE_ERROR`。
+- `SET_READY` 只在 `LOBBY` 阶段成功。
+- 全员 `SET_READY=true` 后进入 `SHOP`，并广播 `ALL_READY`。
+- `SHOP` 阶段允许商店接口，不允许 `PLAYER_READY` 直接开战。
+- 首次合法 `MAP_INIT` 后进入 `MAP`。
+- `MAP` 阶段未提交节点时，`PLAYER_READY` 必须返回 `ROOM_STATE_ERROR`。
+- `MAP` 阶段提交节点后，`PLAYER_READY` 才能进入战斗准备流程。
+- `BATTLE` 阶段拒绝商店接口、地图移动和大厅 ready。
+- 战斗胜利且当前节点还有后继时回到 `MAP`，随后可以继续 `MAP_MOVE`。
+- 战斗失败或最后节点胜利时进入 `END`。
+- 离房/登出清理动作在任意阶段都不应破坏房间状态。
+
+### 4.2 商店阶段
 
 - `SHOP_INIT` 返回的 `items.size()` 应等于 `min(当前房间人数, 物品库大小)`。
 - 同一房间的商店物品顺序在房间创建后保持稳定，不应每次 `SHOP_INIT` 都重新洗牌。
 - `SHOP_MOVE_CURSOR` 对非法 `itemId` 应按当前实现视为取消选择，而不是失败。
+- 非 `SHOP` 阶段调用 `SHOP_INIT` / `SHOP_MOVE_CURSOR` / `SHOP_BUY` 应返回 `ROOM_STATE_ERROR`。
 - `SHOP_BUY` 对已购买物品返回 `SHOP_ITEM_TAKEN`。
 - `SHOP_BUY` 对不可见或不存在的物品返回 `SHOP_INVALID_ITEM`。
 
-### 4.2 地图阶段
+### 4.3 地图阶段
 
 - `MAP_INIT` 懒生成共享地图，后续调用返回同一张图。
+- `MAP_INIT` 只在 `SHOP` 或 `MAP` 阶段成功；首次成功调用应推进到 `MAP`。
 - 第一列必须是唯一根节点，最后一列必须是唯一 `BOSS` 节点。
 - 相邻列连接必须满足：无交叉、后一列全覆盖、允许一对多和多对一。
 - 首次提交必须从根节点开始。
 - 后续提交必须是当前已提交节点的合法后继。
 - 只有全员选择同一节点时才会 commit。
+- 非 `MAP` 阶段调用 `MAP_MOVE` 应返回 `ROOM_STATE_ERROR`。
 
-### 4.3 战斗阶段
+### 4.4 战斗阶段
 
+- `PLAYER_READY` 只有在 `MAP` 阶段且已提交当前地图节点后才成功。
 - `PLAYER_READY` 未全员就绪时广播 `BATTLE_WAIT`。
 - 全员就绪时首个广播应为 `BATTLE_FRAME`，且 `pushMessages` 含 `BATTLE_START`。
 - `BATTLE_SYNC` 上报玩家位置和怪物位置；玩家位置直接转发，怪物位置在 tick 中按实体均值聚合。
-- `PLAYER_SHOOT` 生成子弹实体并产生 `BULLET_SPAWN` 事件。
+- `PLAYER_SHOOT` 生成玩家子弹和 `BULLET_SPAWN`；后续 tick 推进子弹，命中墙/敌人时产生 hit、damage、destroy 事件。
+- 非 `BATTLE` 阶段调用 `BATTLE_SYNC` / `PLAYER_SHOOT` 应返回 `ROOM_STATE_ERROR`。
+- 战斗结束帧应带 `BATTLE_END`。
+- 敌人全部死亡后，若当前地图节点还有后继，下一次 `tick_battle()` 应失败且 `MAP_MOVE` 可继续。
+- 玩家全灭后，下一次 `tick_battle()` 应失败，并且房间进入结束态。
 
 ## 5. 分层落地建议
 
@@ -127,13 +151,14 @@
 
 - `Protocol` 序列化/反序列化与 Envelope 映射
 - `Room` 容量与成员变更逻辑
-- `Room` 商店数量规则、地图提交规则、战斗状态推进
+- `Room` 阶段状态机、商店数量规则、地图提交规则、战斗状态推进
 - `Server` 业务 API 状态迁移与广播分发
 
 ### 5.2 集成测试
 
 - 真实 TCP 连接测试完整命令流
 - 覆盖 auth/lobby/shop/map/battle 五个端口
+- shop/map/battle 网络测试必须先走完整阶段前置流程，例如 `LOBBY ready -> SHOP -> MAP_INIT -> MAP_MOVE -> PLAYER_READY`
 
 ### 5.3 稳定性测试
 
@@ -144,4 +169,4 @@
 
 - Gate A（必须）：第 1 章全部通过。
 - Gate B（发布前）：第 2 章全部通过。
-- Gate C（里程碑）：第 3 章与第 4 章核心场景通过且无高优缺陷。
+- Gate C（里程碑）：第 3 章与第 4 章核心场景通过且无高优缺陷，尤其不能存在跨阶段绕过。
