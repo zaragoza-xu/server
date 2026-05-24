@@ -6,6 +6,12 @@
 namespace {
 constexpr int kEnemyMaxHP = 10;
 constexpr double kEnemyAttackRange = 1.5;
+constexpr int kBulletDamage = 5;
+constexpr double kBulletSpeed = 1.0;
+constexpr double kBulletRadius = 0.25;
+constexpr double kEnemyRadius = 0.75;
+constexpr double kBattleMin = -20.0;
+constexpr double kBattleMax = 20.0;
 
 double distance_squared(const Protocol::BattleVector2 &lhs,
                         const Protocol::BattleVector2 &rhs) {
@@ -16,6 +22,11 @@ double distance_squared(const Protocol::BattleVector2 &lhs,
 
 bool is_valid_vector(const Protocol::BattleVector2 &value) {
   return std::isfinite(value.x) && std::isfinite(value.y);
+}
+
+bool is_outside_battle(const Protocol::BattleVector2 &position) {
+  return position.x < kBattleMin || position.x > kBattleMax ||
+         position.y < kBattleMin || position.y > kBattleMax;
 }
 } // namespace
 
@@ -33,6 +44,10 @@ void Room::reset_battle_state_locked() {
   }
 }
 
+void Room::end_battle_locked() {
+  reset_battle_state_locked();
+}
+
 Protocol::BattleFrameRsp Room::build_battle_frame_locked() const {
   Protocol::BattleFrameRsp frame;
   frame.serverTick = battleTick;
@@ -47,7 +62,10 @@ Protocol::BattleFrameRsp Room::build_battle_frame_locked() const {
   for (const auto &enemyState : battleEnemyStates) {
     frame.enemyEntities.push_back(enemyState.entity);
   }
-  frame.bulletEntities = battleBullets;
+  frame.bulletEntities.reserve(battleBullets.size());
+  for (const auto &bulletState : battleBullets) {
+    frame.bulletEntities.push_back(bulletState.entity);
+  }
   frame.events = pendingBattleEvents;
   return frame;
 }
@@ -105,15 +123,7 @@ void Room::spawn_enemies_locked(const std::vector<EnemySpawnSpec> &spawnPlan) {
     enemyState.attackRange = kEnemyAttackRange;
     update_enemy_intent_locked(enemyState);
 
-    Protocol::BattleEventDTO event;
-    event.eventType = Protocol::BattleEventType::ENEMY_SPAWN;
-    event.eventTick = battleTick;
-    Protocol::BattleEventDTO::SpawnParameter spawn;
-    spawn.entityId = enemyState.entity.entityId;
-    spawn.entityType = Protocol::EntityType::ENEMY;
-    spawn.enemyEntity = enemyState.entity;
-    event.spawnParameter = spawn;
-    pendingBattleEvents.push_back(std::move(event));
+    push_event_locked(EventType::ENEMY_SPAWN, SpawnParam(enemyState.entity));
 
     battleEnemyStates.push_back(std::move(enemyState));
   }
@@ -160,6 +170,70 @@ void Room::apply_enemy_reports_locked() {
   enemyPosByUid.clear();
 }
 
+void Room::tick_bullets_locked() {
+  constexpr double hitDistanceSquared =
+      (kBulletRadius + kEnemyRadius) * (kBulletRadius + kEnemyRadius);
+
+  std::vector<BulletState> liveBullets;
+  liveBullets.reserve(battleBullets.size());
+
+  for (auto &bulletState : battleBullets) {
+    auto &bullet = bulletState.entity;
+    bullet.position.x += bullet.direction.x;
+    bullet.position.y += bullet.direction.y;
+
+    if (is_outside_battle(bullet.position)) {
+      push_event_locked(EventType::BULLET_HIT_WALL,
+                        HitParam(bullet.entityId, EntityType::PLAYER_BULLET, 0,
+                                 EntityType::WALL, bullet.position));
+      push_event_locked(EventType::ENTITY_DESTROY,
+                        DestroyParam(bullet.entityId,
+                                     EntityType::PLAYER_BULLET,
+                                     DestroyReason::BULLET_HIT_WALL));
+      continue;
+    }
+
+    auto enemyIt = std::find_if(
+        battleEnemyStates.begin(), battleEnemyStates.end(),
+        [&bullet, hitDistanceSquared](const BattleEnemyState &enemyState) {
+          return distance_squared(bullet.position,
+                                  enemyState.entity.position) <=
+                 hitDistanceSquared;
+        });
+
+    if (enemyIt == battleEnemyStates.end()) {
+      liveBullets.push_back(std::move(bulletState));
+      continue;
+    }
+
+    auto &enemy = enemyIt->entity;
+    push_event_locked(EventType::BULLET_HIT_ENEMY,
+                      HitParam(bullet.entityId, EntityType::PLAYER_BULLET,
+                               enemy.entityId, EntityType::ENEMY,
+                               bullet.position));
+
+    enemy.attribute.currentHP =
+        std::max(0, enemy.attribute.currentHP - bulletState.damage);
+    push_event_locked(EventType::ENTITY_DAMAGE,
+                      DamageParam(bulletState.sourcePlayerId,
+                                  EntityType::PLAYER, enemy.entityId,
+                                  EntityType::ENEMY, bulletState.damage,
+                                  enemy.attribute.currentHP));
+    push_event_locked(EventType::ENTITY_DESTROY,
+                      DestroyParam(bullet.entityId, EntityType::PLAYER_BULLET,
+                                   DestroyReason::BULLET_HIT_ENTITY));
+
+    if (enemy.attribute.currentHP <= 0) {
+      push_event_locked(EventType::ENTITY_DESTROY,
+                        DestroyParam(enemy.entityId, EntityType::ENEMY,
+                                     DestroyReason::ENTITY_DEAD));
+      battleEnemyStates.erase(enemyIt);
+    }
+  }
+
+  battleBullets = std::move(liveBullets);
+}
+
 bool Room::update_enemy_intent_locked(BattleEnemyState &enemyState) {
   const auto oldIntent = enemyState.entity.currentIntent;
   const auto oldTargetUid = enemyState.entity.targetPlayerUid;
@@ -199,15 +273,10 @@ bool Room::update_enemy_intent_locked(BattleEnemyState &enemyState) {
 }
 
 void Room::push_enemy_intent_locked(const BattleEnemyState &enemyState) {
-  Protocol::BattleEventDTO event;
-  event.eventType = Protocol::BattleEventType::ENEMY_INTENT_CHANGE;
-  event.eventTick = battleTick;
-  Protocol::BattleEventDTO::IntentParameter intent;
-  intent.enemyEntityId = enemyState.entity.entityId;
-  intent.intent = enemyState.entity.currentIntent;
-  intent.targetPlayerUid = enemyState.entity.targetPlayerUid;
-  event.intentParameter = intent;
-  pendingBattleEvents.push_back(std::move(event));
+  push_event_locked(EventType::ENEMY_INTENT_CHANGE,
+                    IntentParam(enemyState.entity.entityId,
+                                enemyState.entity.currentIntent,
+                                enemyState.entity.targetPlayerUid));
 }
 
 void Room::start_battle_locked() {
@@ -304,27 +373,37 @@ bool Room::shoot_battle_player(const std::string &uid,
     return false;
   }
 
-  Protocol::BattleBulletEntity bullet;
+  if (!is_valid_vector(direction)) {
+    return false;
+  }
+  const double directionLengthSquared =
+      direction.x * direction.x + direction.y * direction.y;
+  if (!std::isfinite(directionLengthSquared) || directionLengthSquared <= 0.0) {
+    return false;
+  }
+
+  BulletState bulletState;
+  auto &bullet = bulletState.entity;
   bullet.entityId = nextBattleEntityId++;
   bullet.entityType = Protocol::EntityType::PLAYER_BULLET;
   bullet.position = playerIt->second.position;
-  bullet.direction = direction;
-  battleBullets.push_back(bullet);
+  const double directionLength = std::sqrt(directionLengthSquared);
+  bullet.direction =
+      Protocol::BattleVector2{direction.x / directionLength * kBulletSpeed,
+                              direction.y / directionLength * kBulletSpeed};
+  bulletState.sourcePlayerId = playerIt->second.entityId;
+  bulletState.damage = kBulletDamage;
+  battleBullets.push_back(bulletState);
 
-  Protocol::BattleEventDTO event;
-  event.eventType = Protocol::BattleEventType::BULLET_SPAWN;
-  event.eventTick = battleTick;
-  Protocol::BattleEventDTO::SpawnParameter spawn;
-  spawn.entityId = bullet.entityId;
-  spawn.entityType = Protocol::EntityType::PLAYER_BULLET;
-  spawn.bulletEntity = bullet;
-  event.spawnParameter = spawn;
-  pendingBattleEvents.push_back(std::move(event));
+  push_event_locked(EventType::BULLET_SPAWN, SpawnParam(bullet));
   return true;
 }
 
-bool Room::tick_battle(Protocol::BattleFrameRsp &frame) {
+bool Room::tick_battle(Protocol::BattleFrameRsp &frame, bool *ended) {
   std::lock_guard<std::mutex> lock(roomMutex);
+  if (ended != nullptr) {
+    *ended = false;
+  }
   if (!battleStarted) {
     return false;
   }
@@ -333,18 +412,24 @@ bool Room::tick_battle(Protocol::BattleFrameRsp &frame) {
 
   apply_enemy_reports_locked();
 
-  for (auto &bullet : battleBullets) {
-    bullet.position.x += bullet.direction.x;
-    bullet.position.y += bullet.direction.y;
-  }
+  tick_bullets_locked();
 
-  for (auto &enemyState : battleEnemyStates) {
-    if (update_enemy_intent_locked(enemyState)) {
-      push_enemy_intent_locked(enemyState);
+  const bool battleEnded = battleEnemyStates.empty();
+  if (!battleEnded) {
+    for (auto &enemyState : battleEnemyStates) {
+      if (update_enemy_intent_locked(enemyState)) {
+        push_enemy_intent_locked(enemyState);
+      }
     }
   }
 
   frame = build_battle_frame_locked();
   pendingBattleEvents.clear();
+  if (battleEnded) {
+    end_battle_locked();
+    if (ended != nullptr) {
+      *ended = true;
+    }
+  }
   return true;
 }

@@ -7,6 +7,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "battle.h"
@@ -20,6 +21,12 @@ private:
   struct BattleEnemyState {
     Protocol::BattleEnemyEntity entity;
     double attackRange = 1.5;
+  };
+
+  struct BulletState {
+    Protocol::BattleBulletEntity entity;
+    int sourcePlayerId = 0;
+    int damage = 5;
   };
 
   struct EnemySpawnSpec {
@@ -54,12 +61,47 @@ private:
   std::vector<BattleEnemyState> battleEnemyStates;
   std::unordered_map<std::string, std::unordered_map<int, Protocol::BattlePos>>
       enemyPosByUid;
-  std::vector<Protocol::BattleBulletEntity> battleBullets;
+  std::vector<BulletState> battleBullets;
   std::vector<Protocol::BattleEventDTO> pendingBattleEvents;
   int battleTick = 0;
   int nextBattleEntityId = 1;
   bool battleStarted = false;
   mutable std::mutex roomMutex;
+
+  using Event = Protocol::BattleEventDTO;
+  using EventType = Protocol::BattleEventType;
+  using EntityType = Protocol::EntityType;
+  using DestroyReason = Protocol::BattleEntityDestroyReason;
+  using SpawnParam = Event::SpawnParameter;
+  using HitParam = Event::HitParameter;
+  using DamageParam = Event::DamageParameter;
+  using DestroyParam = Event::DestroyParameter;
+  using IntentParam = Event::IntentParameter;
+
+  static void put_param(Event &event, SpawnParam param) {
+    event.spawnParameter = std::move(param);
+  }
+  static void put_param(Event &event, HitParam param) {
+    event.hitParameter = std::move(param);
+  }
+  static void put_param(Event &event, DamageParam param) {
+    event.damageParameter = std::move(param);
+  }
+  static void put_param(Event &event, DestroyParam param) {
+    event.destroyParameter = std::move(param);
+  }
+  static void put_param(Event &event, IntentParam param) {
+    event.intentParameter = std::move(param);
+  }
+
+  template <typename Param>
+  void push_event_locked(EventType type, Param param) {
+    Event event;
+    event.eventType = type;
+    event.eventTick = battleTick;
+    put_param(event, std::move(param));
+    pendingBattleEvents.push_back(std::move(event));
+  }
 
   int get_item_index(const std::string &itemId) const;
   int get_map_node_index(int nodeId) const;
@@ -74,6 +116,8 @@ private:
   void spawn_enemies_locked(const std::vector<EnemySpawnSpec> &spawnPlan);
   bool has_enemy_locked(int entityId) const;
   void apply_enemy_reports_locked();
+  void tick_bullets_locked();
+  void end_battle_locked();
   bool update_enemy_intent_locked(BattleEnemyState &enemyState);
   void push_enemy_intent_locked(const BattleEnemyState &enemyState);
   void start_battle_locked();
@@ -109,7 +153,7 @@ public:
                    const std::vector<Protocol::BattlePos> &enemyPositions);
   bool shoot_battle_player(const std::string &uid,
                            const Protocol::BattleVector2 &direction);
-  bool tick_battle(Protocol::BattleFrameRsp &frame);
+  bool tick_battle(Protocol::BattleFrameRsp &frame, bool *ended = nullptr);
 
   bool set_member_ready(const std::string &uid, bool ready) {
     std::lock_guard<std::mutex> lock(roomMutex);
