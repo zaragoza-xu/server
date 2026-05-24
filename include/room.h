@@ -21,6 +21,10 @@ private:
   struct BattleEnemyState {
     Protocol::BattleEnemyEntity entity;
     double attackRange = 1.5;
+    double maxSpeed = 1.0;
+    int attackDamage = 4;
+    int attackCooldownTicks = 20;
+    int nextAttackTick = 0;
   };
 
   struct BulletState {
@@ -115,10 +119,13 @@ private:
   build_spawn_plan_locked(Protocol::MapNode::NodeType nodeType) const;
   void spawn_enemies_locked(const std::vector<EnemySpawnSpec> &spawnPlan);
   bool has_enemy_locked(int entityId) const;
+  bool all_players_dead_locked() const;
+  Protocol::BattlePlayerEntity *live_player_locked(const std::string &uid);
   void apply_enemy_reports_locked();
   void tick_bullets_locked();
+  void tick_enemy_attacks_locked();
   void end_battle_locked();
-  bool update_enemy_intent_locked(BattleEnemyState &enemyState);
+  bool update_target_locked(BattleEnemyState &enemyState);
   void push_enemy_intent_locked(const BattleEnemyState &enemyState);
   void start_battle_locked();
 
