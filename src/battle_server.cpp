@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <list>
 #include <memory>
 #include <system_error>
 #include <vector>
@@ -56,14 +57,20 @@ asio::awaitable<void> BattleServer::tick_loop() {
 
     for (const auto &room : rooms) {
       Protocol::BattleFrameRsp frame;
-      if (!room->tick_battle(frame)) {
+      bool battleEnded = false;
+      if (!room->tick_battle(frame, &battleEnded)) {
         continue;
+      }
+      std::list<int> pushMessages;
+      if (battleEnded) {
+        pushMessages.push_back(
+            static_cast<int>(Protocol::BattlePushMessageType::BATTLE_END));
       }
       broadcast_to_members(
           room->get_member_uids(),
           Protocol::LongEnvelope::make_env(
               static_cast<int>(Protocol::BattleResponseType::BATTLE_FRAME),
-              json(frame)));
+              json(frame), pushMessages));
     }
   }
 }
@@ -90,11 +97,16 @@ int Server::battle_player_ready(const Protocol::BattlePlayerReadyReq &req,
     }
     memberUids = room->get_member_uids();
     if (allReady) {
-      room->tick_battle(frame);
+      bool battleEnded = false;
+      room->tick_battle(frame, &battleEnded);
       push.type = static_cast<int>(Protocol::BattleResponseType::BATTLE_FRAME);
       push.data = json(frame);
       push.pushMessages = {
           static_cast<int>(Protocol::BattlePushMessageType::BATTLE_START)};
+      if (battleEnded) {
+        push.pushMessages.push_back(
+            static_cast<int>(Protocol::BattlePushMessageType::BATTLE_END));
+      }
     }
   }
   if (allReady) {

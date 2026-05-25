@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+#include <utility>
 
 #include "types.h"
 
@@ -37,7 +38,10 @@ struct BattleEntity {
 
 struct BattlePlayerAttribute {
   double velocity = 0.25;
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(BattlePlayerAttribute, velocity);
+  int currentHP = 0;
+  int maxHP = 0;
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(BattlePlayerAttribute, velocity,
+                                              currentHP, maxHP);
 };
 
 struct BattlePlayerEntity : BattleEntity {
@@ -85,12 +89,6 @@ inline void from_json(const json &j, BattleBulletEntity &e) {
 
 enum class BattleEnemyType { BUBBLE_FISH = 0 };
 
-enum class BattleEnemyIntent {
-  IDLE = 0,
-  CHASE = 1,
-  ATTACK = 2,
-};
-
 struct BattleEnemyAttribute {
   int currentHP = 0;
   int maxHP = 0;
@@ -102,14 +100,12 @@ struct BattleEnemyEntity : BattleEntity {
   BattleEnemyAttribute attribute;
   BattleEnemyType enemyType = BattleEnemyType::BUBBLE_FISH;
   std::string targetPlayerUid;
-  BattleEnemyIntent currentIntent = BattleEnemyIntent::IDLE;
 };
 inline void to_json(json &j, const BattleEnemyEntity &e) {
   to_json(j, static_cast<const BattleEntity &>(e));
   j["attribute"] = e.attribute;
   j["enemyType"] = e.enemyType;
   j["targetPlayerUid"] = e.targetPlayerUid;
-  j["currentIntent"] = e.currentIntent;
 }
 inline void from_json(const json &j, BattleEnemyEntity &e) {
   from_json(j, static_cast<BattleEntity &>(e));
@@ -119,8 +115,6 @@ inline void from_json(const json &j, BattleEnemyEntity &e) {
     j.at("enemyType").get_to(e.enemyType);
   if (j.contains("targetPlayerUid"))
     j.at("targetPlayerUid").get_to(e.targetPlayerUid);
-  if (j.contains("currentIntent"))
-    j.at("currentIntent").get_to(e.currentIntent);
 }
 
 enum class BattleRequestType {
@@ -138,6 +132,7 @@ enum class BattleResponseType {
 
 enum BattlePushMessageType {
   BATTLE_START = 0,
+  BATTLE_END = 1,
 };
 
 struct BattlePlayerReadyReq {
@@ -209,6 +204,18 @@ struct BattleEventDTO {
     BattlePlayerEntity playerEntity;
     BattleEnemyEntity enemyEntity;
     BattleBulletEntity bulletEntity;
+
+    SpawnParameter() = default;
+    explicit SpawnParameter(const BattlePlayerEntity &entity)
+        : entityId(entity.entityId), entityType(entity.entityType),
+          playerEntity(entity) {}
+    explicit SpawnParameter(const BattleEnemyEntity &entity)
+        : entityId(entity.entityId), entityType(entity.entityType),
+          enemyEntity(entity) {}
+    explicit SpawnParameter(const BattleBulletEntity &entity)
+        : entityId(entity.entityId), entityType(entity.entityType),
+          bulletEntity(entity) {}
+
     NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(SpawnParameter, entityId,
                                                 entityType, playerEntity,
                                                 enemyEntity, bulletEntity)
@@ -220,6 +227,15 @@ struct BattleEventDTO {
     int targetEntityId = 0;
     EntityType targetEntityType = EntityType::PLAYER;
     BattleVector2 hitPosition;
+
+    HitParameter() = default;
+    HitParameter(int sourceEntityId, EntityType sourceEntityType,
+                 int targetEntityId, EntityType targetEntityType,
+                 const BattleVector2 &hitPosition)
+        : sourceEntityId(sourceEntityId), sourceEntityType(sourceEntityType),
+          targetEntityId(targetEntityId), targetEntityType(targetEntityType),
+          hitPosition(hitPosition) {}
+
     NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(HitParameter, sourceEntityId,
                                                 sourceEntityType,
                                                 targetEntityId,
@@ -233,6 +249,15 @@ struct BattleEventDTO {
     EntityType targetEntityType = EntityType::PLAYER;
     int damage = 0;
     int currentHP = 0;
+
+    DamageParameter() = default;
+    DamageParameter(int sourceEntityId, EntityType sourceEntityType,
+                    int targetEntityId, EntityType targetEntityType, int damage,
+                    int currentHP)
+        : sourceEntityId(sourceEntityId), sourceEntityType(sourceEntityType),
+          targetEntityId(targetEntityId), targetEntityType(targetEntityType),
+          damage(damage), currentHP(currentHP) {}
+
     NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(DamageParameter, sourceEntityId,
                                                 sourceEntityType,
                                                 targetEntityId,
@@ -245,16 +270,28 @@ struct BattleEventDTO {
     EntityType entityType = EntityType::PLAYER;
     BattleEntityDestroyReason destroyReason =
         BattleEntityDestroyReason::UNKNOWN;
+
+    DestroyParameter() = default;
+    DestroyParameter(int entityId, EntityType entityType,
+                     BattleEntityDestroyReason destroyReason)
+        : entityId(entityId), entityType(entityType),
+          destroyReason(destroyReason) {}
+
     NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(DestroyParameter, entityId,
                                                 entityType, destroyReason)
   };
 
   struct IntentParameter {
     int enemyEntityId = 0;
-    BattleEnemyIntent intent = BattleEnemyIntent::IDLE;
     std::string targetPlayerUid;
+
+    IntentParameter() = default;
+    IntentParameter(int enemyEntityId, std::string targetPlayerUid)
+        : enemyEntityId(enemyEntityId),
+          targetPlayerUid(std::move(targetPlayerUid)) {}
+
     NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(IntentParameter, enemyEntityId,
-                                                intent, targetPlayerUid)
+                                                targetPlayerUid)
   };
 
   std::optional<SpawnParameter> spawnParameter;

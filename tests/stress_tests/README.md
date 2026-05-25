@@ -41,6 +41,8 @@ sudo apt-get install -y python3 python3-venv
 
 在仓库根目录执行：
 
+当前压测场景主要覆盖认证与大厅短连接链路，不覆盖 `SHOP -> MAP -> BATTLE` 阶段状态机；阶段流由单元测试和网络集成测试覆盖。若新增商店/地图/战斗压测场景，必须按业务前置流程推进：`LOBBY ready -> SHOP -> MAP_INIT -> MAP_MOVE -> PLAYER_READY`。
+
 执行模型：
 
 - 单机多线程 + 多协程（每个线程一个 asyncio 事件循环）

@@ -118,6 +118,13 @@ TEST(ServerDispatchTest, ShopServerDispatchRouting) {
   ASSERT_EQ(createEnv.get<Protocol::ShortEnvelope>().code,
             Protocol::SERVICE_SUCCESS);
 
+  auto readyEnv = homeServer->dispatch_request(json(Protocol::SetReadyReq{
+      .type = Protocol::HomeRequestType::SET_READY,
+      .uid = uid,
+      .ready = true,
+  }));
+  ASSERT_TRUE(readyEnv.is_null());
+
   // Shop init via shop server (long dispatch)
   auto shopInitEnv = shopServer->dispatch_request(json(Protocol::ShopInitReq{
       .type = Protocol::ShopRequestType::SHOP_INIT, .uid = uid}));
