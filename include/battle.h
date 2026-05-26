@@ -37,10 +37,10 @@ struct BattleEntity {
 // ===== 玩家相关 =====
 
 struct BattlePlayerAttribute {
-  double velocity = 0.25;
+  double speed = 0.25;
   int currentHP = 0;
   int maxHP = 0;
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(BattlePlayerAttribute, velocity,
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(BattlePlayerAttribute, speed,
                                               currentHP, maxHP);
 };
 
@@ -75,14 +75,22 @@ struct BattleInfo {
 
 // ===== 中立相关 =====
 
+enum class BattleBulletType {
+  SELF_BULLET = 0,
+  PLAYER_BULLET = 1,
+  ENEMY_BULLET = 2
+};
 struct BattleBulletEntity : BattleEntity {
-  // 预留扩展
+  BattleBulletType type = BattleBulletType::SELF_BULLET;
 };
 inline void to_json(json &j, const BattleBulletEntity &e) {
   to_json(j, static_cast<const BattleEntity &>(e));
+  j["type"] = e.type;
 }
 inline void from_json(const json &j, BattleBulletEntity &e) {
   from_json(j, static_cast<BattleEntity &>(e));
+  if (j.contains("type"))
+    j.at("type").get_to(e.type);
 }
 
 // ===== 敌人相关 =====
@@ -119,7 +127,7 @@ inline void from_json(const json &j, BattleEnemyEntity &e) {
 
 enum class BattleRequestType {
   PLAYER_READY = 0,
-  BATTLE_SYNC = 1,
+  POSITION_SYNC = 1,
   PLAYER_SHOOT = 2,
   ERROR = 100,
 };

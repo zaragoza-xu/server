@@ -52,16 +52,36 @@ int count_event(const std::vector<Protocol::BattleEventDTO> &events,
                     }));
 }
 
+bool has_cleared_enemy_target(
+    const std::vector<Protocol::BattleEventDTO> &events) {
+  return std::any_of(
+      events.begin(), events.end(), [](const Protocol::BattleEventDTO &event) {
+        return event.eventType ==
+                   Protocol::BattleEventType::ENEMY_INTENT_CHANGE &&
+               event.intentParameter.has_value() &&
+               event.intentParameter->targetPlayerUid.empty();
+      });
+}
+
+std::vector<Protocol::BattleEnemyEntity>
+spawned_enemies(const Protocol::BattleFrameRsp &frame) {
+  std::vector<Protocol::BattleEnemyEntity> enemies;
+  for (const auto &event : frame.events) {
+    if (event.eventType == Protocol::BattleEventType::ENEMY_SPAWN &&
+        event.spawnParameter.has_value()) {
+      enemies.push_back(event.spawnParameter->enemyEntity);
+    }
+  }
+  return enemies;
+}
+
 std::optional<Protocol::BattleEnemyEntity>
-find_enemy(const Protocol::BattleFrameRsp &frame, int entityId) {
-  auto it = std::find_if(frame.enemyEntities.begin(), frame.enemyEntities.end(),
-                         [entityId](const Protocol::BattleEnemyEntity &enemy) {
-                           return enemy.entityId == entityId;
-                         });
-  if (it == frame.enemyEntities.end()) {
+first_spawned_enemy(const Protocol::BattleFrameRsp &frame) {
+  const auto enemies = spawned_enemies(frame);
+  if (enemies.empty()) {
     return std::nullopt;
   }
-  return *it;
+  return enemies.front();
 }
 
 std::optional<Protocol::BattlePlayerEntity>
@@ -77,11 +97,15 @@ find_player(const Protocol::BattleFrameRsp &frame, const std::string &uid) {
   return *it;
 }
 
-double dist(const Protocol::BattleVector2 &lhs,
-            const Protocol::BattleVector2 &rhs) {
-  const double dx = lhs.x - rhs.x;
-  const double dy = lhs.y - rhs.y;
-  return std::sqrt(dx * dx + dy * dy);
+Protocol::BattleVector2 dir_to(const Protocol::BattleVector2 &from,
+                               const Protocol::BattleVector2 &to) {
+  const double dx = to.x - from.x;
+  const double dy = to.y - from.y;
+  const double len = std::sqrt(dx * dx + dy * dy);
+  if (len <= 0.0) {
+    return {1.0, 0.0};
+  }
+  return {dx / len, dy / len};
 }
 
 bool tick_until(Room &room, Protocol::BattleFrameRsp &frame,
@@ -152,8 +176,8 @@ void select_first_node(Room &room, const std::string &uid) {
 
   std::vector<Protocol::MapSync> selectStatus;
   bool committed = false;
-  ASSERT_TRUE(room.move_map(uid, init.map.front().nodeId, selectStatus,
-                            committed));
+  ASSERT_TRUE(
+      room.move_map(uid, init.map.front().nodeId, selectStatus, committed));
   ASSERT_TRUE(committed);
 }
 
@@ -170,7 +194,7 @@ void start_battle(Room &room, const std::string &uid,
   ASSERT_TRUE(allReady);
   ASSERT_TRUE(room.tick_battle(frame));
   ASSERT_FALSE(frame.playerEntities.empty());
-  ASSERT_FALSE(frame.enemyEntities.empty());
+  ASSERT_TRUE(first_spawned_enemy(frame).has_value());
 }
 
 TEST(RoomTest, BasicBehavior) {
@@ -372,6 +396,8 @@ TEST(RoomTest, BattleStartPushesInitialIntentChange) {
   auto harness = make_room();
   Protocol::BattleFrameRsp frame;
   start_battle(*harness.room, harness.uid, frame);
+  const auto enemy = first_spawned_enemy(frame);
+  ASSERT_TRUE(enemy.has_value());
 
   const int eventIndex =
       find_event(frame.events, Protocol::BattleEventType::ENEMY_INTENT_CHANGE);
@@ -381,7 +407,7 @@ TEST(RoomTest, BattleStartPushesInitialIntentChange) {
       1);
   ASSERT_TRUE(frame.events[eventIndex].intentParameter.has_value());
   EXPECT_EQ(frame.events[eventIndex].intentParameter->enemyEntityId,
-            frame.enemyEntities.front().entityId);
+            enemy->entityId);
   EXPECT_EQ(frame.events[eventIndex].intentParameter->targetPlayerUid,
             harness.uid);
 }
@@ -390,9 +416,12 @@ TEST(RoomTest, BattleBulletHitDamagesEnemy) {
   auto harness = make_room();
   Protocol::BattleFrameRsp frame;
   start_battle(*harness.room, harness.uid, frame);
-  const int enemyId = frame.enemyEntities.front().entityId;
+  const auto enemy = first_spawned_enemy(frame);
+  ASSERT_TRUE(enemy.has_value());
+  const int enemyId = enemy->entityId;
 
-  ASSERT_TRUE(harness.room->shoot_battle_player(harness.uid, {0.0, 1.0}));
+  ASSERT_TRUE(harness.room->shoot_battle_player(
+      harness.uid, dir_to({0.0, 0.0}, enemy->position)));
   ASSERT_TRUE(tick_until(*harness.room, frame,
                          Protocol::BattleEventType::ENTITY_DAMAGE));
 
@@ -424,22 +453,22 @@ TEST(RoomTest, BattleBulletHitDamagesEnemy) {
             Protocol::BattleEntityDestroyReason::BULLET_HIT_ENTITY);
 
   EXPECT_TRUE(frame.bulletEntities.empty());
-  const auto enemy = find_enemy(frame, enemyId);
-  ASSERT_TRUE(enemy.has_value());
-  EXPECT_EQ(enemy->attribute.currentHP, 5);
 }
 
 TEST(RoomTest, BattleSecondHitKillsEnemy) {
   auto harness = make_room();
   Protocol::BattleFrameRsp frame;
   start_battle(*harness.room, harness.uid, frame);
-  const int enemyId = frame.enemyEntities.front().entityId;
+  const auto enemy = first_spawned_enemy(frame);
+  ASSERT_TRUE(enemy.has_value());
+  const int enemyId = enemy->entityId;
+  const auto shotDir = dir_to({0.0, 0.0}, enemy->position);
 
-  ASSERT_TRUE(harness.room->shoot_battle_player(harness.uid, {0.0, 1.0}));
+  ASSERT_TRUE(harness.room->shoot_battle_player(harness.uid, shotDir));
   ASSERT_TRUE(tick_until(*harness.room, frame,
                          Protocol::BattleEventType::ENTITY_DAMAGE));
 
-  ASSERT_TRUE(harness.room->shoot_battle_player(harness.uid, {0.0, 1.0}));
+  ASSERT_TRUE(harness.room->shoot_battle_player(harness.uid, shotDir));
   ASSERT_TRUE(tick_until(*harness.room, frame,
                          Protocol::BattleEventType::ENTITY_DESTROY));
 
@@ -464,16 +493,14 @@ TEST(RoomTest, BattleSecondHitKillsEnemy) {
             Protocol::BattleEntityDestroyReason::ENTITY_DEAD);
 
   EXPECT_TRUE(frame.bulletEntities.empty());
-  EXPECT_TRUE(frame.enemyEntities.empty());
 }
 
-TEST(RoomTest, BattleEndStopsTickAndReturnsToMap) {
+TEST(RoomTest, BattleWavesKeepRunningAfterOneEnemyDies) {
   auto harness = make_room();
   ASSERT_TRUE(harness.room->set_member_ready(harness.uid, true));
   Protocol::MapInitRsp init;
   ASSERT_TRUE(harness.room->get_map_init(init));
   ASSERT_FALSE(init.map.empty());
-  ASSERT_FALSE(init.map.front().nextId.empty());
 
   std::vector<Protocol::MapSync> selectStatus;
   bool committed = false;
@@ -488,68 +515,59 @@ TEST(RoomTest, BattleEndStopsTickAndReturnsToMap) {
   ASSERT_TRUE(allReady);
   ASSERT_TRUE(harness.room->tick_battle(frame));
   ASSERT_FALSE(frame.playerEntities.empty());
-  ASSERT_FALSE(frame.enemyEntities.empty());
-  ASSERT_TRUE(harness.room->shoot_battle_player(harness.uid, {0.0, 1.0}));
+  const auto enemy = first_spawned_enemy(frame);
+  ASSERT_TRUE(enemy.has_value());
+  const auto shotDir = dir_to({0.0, 0.0}, enemy->position);
+
+  ASSERT_TRUE(harness.room->shoot_battle_player(harness.uid, shotDir));
   bool ended = false;
-  bool damaged = false;
-  for (int tick = 0; tick < 20 && !damaged; ++tick) {
-    ASSERT_TRUE(harness.room->tick_battle(frame, &ended));
-    damaged =
-        find_event(frame.events, Protocol::BattleEventType::ENTITY_DAMAGE) >= 0;
-  }
-  ASSERT_TRUE(damaged);
+  ASSERT_TRUE(tick_until(*harness.room, frame,
+                         Protocol::BattleEventType::ENTITY_DAMAGE));
   EXPECT_FALSE(ended);
 
-  ASSERT_TRUE(harness.room->shoot_battle_player(harness.uid, {0.0, 1.0}));
-  for (int tick = 0; tick < 20 && !ended; ++tick) {
-    ASSERT_TRUE(harness.room->tick_battle(frame, &ended));
-  }
-  EXPECT_TRUE(ended);
-  EXPECT_TRUE(frame.enemyEntities.empty());
-
-  EXPECT_FALSE(harness.room->tick_battle(frame));
-  ASSERT_TRUE(harness.room->move_map(
-      harness.uid, init.map.front().nextId.front(), selectStatus, committed));
-  EXPECT_TRUE(committed);
+  ASSERT_TRUE(harness.room->shoot_battle_player(harness.uid, shotDir));
+  ASSERT_TRUE(tick_until(*harness.room, frame,
+                         Protocol::BattleEventType::ENTITY_DESTROY));
+  EXPECT_FALSE(ended);
+  EXPECT_TRUE(harness.room->tick_battle(frame, &ended));
+  EXPECT_FALSE(ended);
 }
 
 TEST(RoomTest, EnemyReportsAreSpeedLimited) {
   auto harness = make_room();
   Protocol::BattleFrameRsp frame;
   start_battle(*harness.room, harness.uid, frame);
-  ASSERT_FALSE(frame.enemyEntities.empty());
-  const auto startPos = frame.enemyEntities.front().position;
-  const int enemyId = frame.enemyEntities.front().entityId;
+  const auto enemy = first_spawned_enemy(frame);
+  ASSERT_TRUE(enemy.has_value());
 
   Protocol::BattlePos report;
-  report.entityId = enemyId;
-  report.position = {20.0, 20.0};
-  report.direction = {1.0, 1.0};
+  report.entityId = enemy->entityId;
+  report.position = {0.0, 0.0};
+  report.direction = dir_to(enemy->position, report.position);
   ASSERT_TRUE(
       harness.room->sync_battle(harness.uid, {0.0, 0.0}, {0.0, 1.0}, {report}));
   ASSERT_TRUE(harness.room->tick_battle(frame));
+  EXPECT_EQ(find_event(frame.events, Protocol::BattleEventType::ENTITY_DAMAGE),
+            -1);
 
-  const auto enemy = find_enemy(frame, enemyId);
-  ASSERT_TRUE(enemy.has_value());
-  EXPECT_LE(dist(startPos, enemy->position), 1.000001);
-  EXPECT_LE(enemy->position.x, 20.0);
-  EXPECT_LE(enemy->position.y, 20.0);
+  const auto player = find_player(frame, harness.uid);
+  ASSERT_TRUE(player.has_value());
+  EXPECT_EQ(player->attribute.currentHP, player->attribute.maxHP);
 }
 
 TEST(RoomTest, EnemyFallbackMovesWhenClientsDoNotReport) {
   auto harness = make_room();
   Protocol::BattleFrameRsp frame;
   start_battle(*harness.room, harness.uid, frame);
-  ASSERT_FALSE(frame.enemyEntities.empty());
-  const int enemyId = frame.enemyEntities.front().entityId;
-  const auto startPos = frame.enemyEntities.front().position;
 
-  ASSERT_TRUE(harness.room->tick_battle(frame));
-
-  const auto enemy = find_enemy(frame, enemyId);
-  ASSERT_TRUE(enemy.has_value());
-  EXPECT_LT(enemy->position.y, startPos.y);
-  EXPECT_DOUBLE_EQ(enemy->position.x, startPos.x);
+  ASSERT_TRUE(tick_until(*harness.room, frame,
+                         Protocol::BattleEventType::ENTITY_DAMAGE, 40));
+  const int damageIndex =
+      find_event(frame.events, Protocol::BattleEventType::ENTITY_DAMAGE);
+  ASSERT_GE(damageIndex, 0);
+  ASSERT_TRUE(frame.events[damageIndex].damageParameter.has_value());
+  EXPECT_EQ(frame.events[damageIndex].damageParameter->sourceEntityType,
+            Protocol::EntityType::ENEMY);
 }
 
 TEST(RoomTest, EnemyAttackDamagesPlayer) {
@@ -590,14 +608,7 @@ TEST(RoomTest, BattleDefeatsWhenAllPlayersDie) {
   const auto player = find_player(frame, harness.uid);
   ASSERT_TRUE(player.has_value());
   EXPECT_EQ(player->attribute.currentHP, 0);
-  ASSERT_FALSE(frame.enemyEntities.empty());
-  EXPECT_TRUE(frame.enemyEntities.front().targetPlayerUid.empty());
-  const int intentIndex =
-      find_event(frame.events, Protocol::BattleEventType::ENEMY_INTENT_CHANGE);
-  ASSERT_GE(intentIndex, 0);
-  ASSERT_TRUE(frame.events[intentIndex].intentParameter.has_value());
-  EXPECT_TRUE(
-      frame.events[intentIndex].intentParameter->targetPlayerUid.empty());
+  EXPECT_TRUE(has_cleared_enemy_target(frame.events));
 
   const int destroyIndex =
       find_event(frame.events, Protocol::BattleEventType::ENTITY_DESTROY);
@@ -638,32 +649,112 @@ TEST(RoomTest, BattleBulletHitsWallOutOfBounds) {
   EXPECT_TRUE(frame.bulletEntities.empty());
 }
 
-TEST(RoomTest, BattleBulletHitsFirstEnemyOnly) {
+TEST(RoomTest, BossNodeUsesBossEnemyPool) {
   auto harness = make_room();
   select_boss(*harness.room, harness.uid);
   Protocol::BattleFrameRsp frame;
   start_battle(*harness.room, harness.uid, frame);
-  ASSERT_GE(frame.enemyEntities.size(), 2U);
-  const int firstEnemyId = frame.enemyEntities[0].entityId;
-  const int secondEnemyId = frame.enemyEntities[1].entityId;
+  const auto enemies = spawned_enemies(frame);
+  ASSERT_EQ(enemies.size(), 1U);
+  EXPECT_EQ(enemies.front().attribute.maxHP, 36);
+  EXPECT_EQ(enemies.front().attribute.currentHP, 36);
+}
 
-  ASSERT_TRUE(harness.room->shoot_battle_player(harness.uid, {0.0, 1.0}));
-  ASSERT_TRUE(tick_until(*harness.room, frame,
-                         Protocol::BattleEventType::BULLET_HIT_ENEMY));
+TEST(RoomTest, BattleUsesConfiguredStats) {
+  auto state = std::make_shared<ServerState>();
+  state->battleConfig = default_battle_config();
+  state->battleConfig.playerMaxHP = 33;
+  state->battleConfig.enemies = {
+      {BattleEnemyPool::NORMAL, Protocol::BattleEnemyType::BUBBLE_FISH, 42, 2.5,
+       1.4, 8, 11, 3.0, 0.0, 100.0},
+  };
 
-  const int hitIndex =
-      find_event(frame.events, Protocol::BattleEventType::BULLET_HIT_ENEMY);
-  ASSERT_GE(hitIndex, 0);
-  ASSERT_TRUE(frame.events[hitIndex].hitParameter.has_value());
-  EXPECT_EQ(frame.events[hitIndex].hitParameter->targetEntityId, firstEnemyId);
+  Protocol::PlayerBasicInfo creatorInfo{"1", "creator", 1};
+  state->userData.emplace(creatorInfo.uid,
+                          Protocol::PlayerData{.basicInfo = creatorInfo});
+  auto creator = std::make_shared<User>(creatorInfo.uid, state);
+  Room room(77, 1, state, creator);
 
-  const auto firstEnemy = find_enemy(frame, firstEnemyId);
-  const auto secondEnemy = find_enemy(frame, secondEnemyId);
-  ASSERT_TRUE(firstEnemy.has_value());
-  ASSERT_TRUE(secondEnemy.has_value());
-  EXPECT_EQ(firstEnemy->attribute.currentHP, 5);
-  EXPECT_EQ(secondEnemy->attribute.currentHP, 10);
-  EXPECT_TRUE(frame.bulletEntities.empty());
+  Protocol::BattleFrameRsp frame;
+  start_battle(room, creatorInfo.uid, frame);
+  ASSERT_FALSE(frame.playerEntities.empty());
+  EXPECT_EQ(frame.playerEntities.front().attribute.maxHP, 33);
+  EXPECT_EQ(frame.playerEntities.front().attribute.currentHP, 33);
+
+  const auto enemies = spawned_enemies(frame);
+  ASSERT_EQ(enemies.size(), 1U);
+  EXPECT_EQ(enemies.front().attribute.maxHP, 42);
+  EXPECT_EQ(enemies.front().attribute.currentHP, 42);
+}
+
+TEST(RoomTest, BattleSpawnClampsFallbackPositionInsideBounds) {
+  auto state = std::make_shared<ServerState>();
+  state->battleConfig = default_battle_config();
+  state->battleConfig.battleMin = -1.0;
+  state->battleConfig.battleMax = 1.0;
+  state->battleConfig.spawnRadiusMin = 10.0;
+  state->battleConfig.spawnRadiusMax = 10.0;
+  state->battleConfig.enemies = {
+      {BattleEnemyPool::NORMAL, Protocol::BattleEnemyType::BUBBLE_FISH, 10, 1.5,
+       1.0, 4, 20, 3.0, 0.0, 100.0},
+  };
+
+  Protocol::PlayerBasicInfo creatorInfo{"1", "creator", 1};
+  state->userData.emplace(creatorInfo.uid,
+                          Protocol::PlayerData{.basicInfo = creatorInfo});
+  auto creator = std::make_shared<User>(creatorInfo.uid, state);
+  Room room(79, 1, state, creator);
+
+  Protocol::BattleFrameRsp frame;
+  start_battle(room, creatorInfo.uid, frame);
+  const auto enemies = spawned_enemies(frame);
+  ASSERT_EQ(enemies.size(), 1U);
+  EXPECT_GE(enemies.front().position.x, state->battleConfig.battleMin);
+  EXPECT_LE(enemies.front().position.x, state->battleConfig.battleMax);
+  EXPECT_GE(enemies.front().position.y, state->battleConfig.battleMin);
+  EXPECT_LE(enemies.front().position.y, state->battleConfig.battleMax);
+}
+
+TEST(RoomTest, BattleWinsWhenTimeExpires) {
+  auto state = std::make_shared<ServerState>();
+  state->battleConfig = default_battle_config();
+  state->battleConfig.frameRate = 10;
+  state->battleConfig.durationSeconds = 0.2;
+  state->battleConfig.baseSpawnBudget = 1.0;
+  state->battleConfig.enemies = {
+      {BattleEnemyPool::NORMAL, Protocol::BattleEnemyType::BUBBLE_FISH, 10, 1.5,
+       1.0, 4, 20, 100.0, 0.0, 100.0},
+  };
+
+  Protocol::PlayerBasicInfo creatorInfo{"1", "creator", 1};
+  state->userData.emplace(creatorInfo.uid,
+                          Protocol::PlayerData{.basicInfo = creatorInfo});
+  auto creator = std::make_shared<User>(creatorInfo.uid, state);
+  Room room(78, 1, state, creator);
+
+  ASSERT_TRUE(room.set_member_ready(creatorInfo.uid, true));
+  Protocol::MapInitRsp init;
+  ASSERT_TRUE(room.get_map_init(init));
+  ASSERT_FALSE(init.map.empty());
+
+  std::vector<Protocol::MapSync> selectStatus;
+  bool committed = false;
+  ASSERT_TRUE(room.move_map(creatorInfo.uid, init.map.front().nodeId,
+                            selectStatus, committed));
+  ASSERT_TRUE(committed);
+
+  Protocol::BattleWaitRsp waitRsp;
+  bool allReady = false;
+  ASSERT_TRUE(room.set_battle_ready(creatorInfo.uid, waitRsp, allReady));
+  ASSERT_TRUE(allReady);
+
+  Protocol::BattleFrameRsp frame;
+  bool ended = false;
+  ASSERT_TRUE(room.tick_battle(frame, &ended));
+  EXPECT_FALSE(ended);
+  ASSERT_TRUE(room.tick_battle(frame, &ended));
+  EXPECT_TRUE(ended);
+  EXPECT_FALSE(room.tick_battle(frame));
 }
 
 } // namespace

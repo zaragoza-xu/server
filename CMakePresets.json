@@ -23,7 +23,7 @@
       "displayName": "Debug",
       "description": "Debug configure with Ninja (symbols enabled)",
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build/debug",
+      "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
@@ -35,7 +35,7 @@
       "displayName": "Debug Tests",
       "description": "Debug configure with Ninja and unit tests enabled",
       "inherits": "debug",
-      "binaryDir": "${sourceDir}/build/debug-tests",
+      "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",

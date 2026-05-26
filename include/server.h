@@ -3,8 +3,10 @@
 #include <array>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <type_traits>
 #include <unordered_map>
+#include <vector>
 
 #include <asio/awaitable.hpp>
 #include <asio/co_spawn.hpp>
@@ -14,6 +16,7 @@
 #include <asio/steady_timer.hpp>
 
 #include "battle.h"
+#include "battle_config.h"
 #include "protocol.h"
 
 class Channel;
@@ -29,6 +32,7 @@ struct ServerState {
   std::unordered_map<int, std::shared_ptr<Room>> rooms;
   std::vector<std::string> shopCatalogItemIds;
   std::string shopCatalogVersion = "v1";
+  BattleConfig battleConfig;
   std::mutex usersMutex;
   std::mutex roomsMutex;
   std::mutex userDataMutex;
@@ -295,7 +299,7 @@ private:
        &Server::dispatch_entry_long<Protocol::BattlePlayerReadyReq,
                                     Protocol::NoResponseRsp,
                                     &Server::battle_player_ready>},
-      {Protocol::BattleRequestType::BATTLE_SYNC,
+      {Protocol::BattleRequestType::POSITION_SYNC,
        &Server::dispatch_entry_long<Protocol::BattleSyncReq,
                                     Protocol::NoResponseRsp,
                                     &Server::battle_sync>},

@@ -72,7 +72,8 @@ bool Room::try_commit_map_move_locked() {
 
 Room::Room(int roomId, size_t maximumPeople, std::shared_ptr<ServerState> state,
            std::shared_ptr<User> creator)
-    : state(std::move(state)), roomId(roomId), maximumPeople(maximumPeople) {
+    : state(std::move(state)), roomId(roomId), maximumPeople(maximumPeople),
+      battleRng(std::random_device{}()) {
   const auto creator_uid = creator->get_uid();
   uids.push_back(creator_uid);
   readyStates.emplace(creator_uid, false);
@@ -90,6 +91,9 @@ Room::Room(int roomId, size_t maximumPeople, std::shared_ptr<ServerState> state,
   }();
   if (shared_state) {
     shopCatalogVersion = shared_state->shopCatalogVersion;
+    if (!shared_state->battleConfig.enemies.empty()) {
+      battleConfig = shared_state->battleConfig;
+    }
   } else {
     shopCatalogVersion = "embedded-v1";
   }

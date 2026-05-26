@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <random>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -11,6 +13,7 @@
 #include <vector>
 
 #include "battle.h"
+#include "battle_config.h"
 #include "protocol.h"
 
 class User;
@@ -38,6 +41,13 @@ private:
         Protocol::BattleEnemyType::BUBBLE_FISH;
     Protocol::BattleVector2 position;
     int maxHP = 10;
+    double attackRange = 1.5;
+    double maxSpeed = 1.0;
+    int attackDamage = 4;
+    int attackCooldownTicks = 20;
+    double cost = 1.0;
+    double unlockTime = 0.0;
+    double weight = 1.0;
   };
 
   enum class Phase { LOBBY, SHOP, MAP, BATTLE, END };
@@ -62,17 +72,20 @@ private:
   std::unordered_map<std::string, int> selectedMapNodeByUid;
 
   // battle info
+  BattleConfig battleConfig = default_battle_config();
   std::unordered_map<std::string, bool> battleReadyStates;
   std::unordered_map<std::string, Protocol::BattlePlayerEntity>
       battlePlayersByUid;
-  std::vector<BattleEnemyState> battleEnemyStates;
+  std::unordered_map<int, BattleEnemyState> battleEnemyStates;
   std::unordered_map<std::string, std::unordered_map<int, Protocol::BattlePos>>
       enemyPosByUid;
   std::vector<BulletState> battleBullets;
   std::vector<Protocol::BattleEventDTO> pendingBattleEvents;
   int battleTick = 0;
   int nextBattleEntityId = 1;
+  int nextBattleSpawnTick = 1;
   bool battleStarted = false;
+  std::mt19937 battleRng;
   mutable std::mutex roomMutex;
 
   using Event = Protocol::BattleEventDTO;
@@ -120,9 +133,15 @@ private:
   void reset_battle_state_locked();
   Protocol::BattleFrameRsp build_battle_frame_locked() const;
   Protocol::MapNode::NodeType resolve_map_node_type_locked() const;
-  std::vector<EnemySpawnSpec>
-  build_spawn_plan_locked(Protocol::MapNode::NodeType nodeType) const;
-  void spawn_enemies_locked(const std::vector<EnemySpawnSpec> &spawnPlan);
+  double battle_time_locked() const;
+  double battle_difficulty_locked() const;
+  std::vector<EnemySpawnSpec> enemy_pool_locked(double time,
+                                                double difficulty) const;
+  std::optional<EnemySpawnSpec>
+  pick_enemy_locked(const std::vector<EnemySpawnSpec> &pool, double budget);
+  Protocol::BattleVector2 spawn_pos_locked();
+  void spawn_enemies_locked(const std::vector<EnemySpawnSpec> &spawns);
+  void tick_spawn_locked();
   bool has_enemy_locked(int entityId) const;
   bool all_players_dead_locked() const;
   Protocol::BattlePlayerEntity *live_player_locked(const std::string &uid);
