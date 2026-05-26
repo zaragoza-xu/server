@@ -5,6 +5,7 @@
 #include <chrono>
 #include <list>
 #include <memory>
+#include <mutex>
 #include <system_error>
 #include <vector>
 
@@ -16,10 +17,6 @@
 #include "channel.h"
 #include "logging.h"
 #include "room.h"
-
-namespace {
-constexpr auto kBattleTickInterval = std::chrono::milliseconds(16);
-}
 
 void BattleServer::start() {
   Server::start();
@@ -34,7 +31,13 @@ void BattleServer::start() {
 
 asio::awaitable<void> BattleServer::tick_loop() {
   while (true) {
-    tickTimer.expires_after(kBattleTickInterval);
+    auto sharedState = this->get_shared_state();
+    const int frameRate =
+        (sharedState && sharedState->battleConfig.frameRate > 0)
+            ? sharedState->battleConfig.frameRate
+            : default_battle_config().frameRate;
+    tickTimer.expires_after(
+        std::chrono::milliseconds(std::max(1, 1000 / frameRate)));
     std::error_code ec;
     co_await tickTimer.async_wait(
         asio::redirect_error(asio::use_awaitable, ec));
@@ -44,7 +47,6 @@ asio::awaitable<void> BattleServer::tick_loop() {
     }
 
     std::vector<std::shared_ptr<Room>> rooms;
-    auto sharedState = this->get_shared_state();
     {
       std::lock_guard<std::mutex> lock(sharedState->roomsMutex);
       rooms.reserve(sharedState->rooms.size());

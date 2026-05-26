@@ -1,0 +1,91 @@
+{
+  "playerMaxHP": 20,
+  "frameRate": 60,
+  "durationSeconds": 180,
+  "spawnIntervalSeconds": 0.5,
+  "baseSpawnBudget": 4,
+  "difficultyGrowth": 0.08,
+  "maxCostFactor": 3,
+  "spawnRadiusMin": 8,
+  "spawnRadiusMax": 12,
+  "battleMin": -20,
+  "battleMax": 20,
+  "bulletSpeed": 1,
+  "bulletDamage": 5,
+  "bulletRadius": 0.25,
+  "enemyRadius": 0.75,
+  "enemies": [
+    {
+      "pool": "normal",
+      "enemyType": "BUBBLE_FISH",
+      "maxHP": 10,
+      "attackRange": 1.5,
+      "maxSpeed": 1,
+      "attackDamage": 4,
+      "attackCooldownTicks": 20,
+      "cost": 3,
+      "unlockTime": 0,
+      "weight": 100
+    },
+    {
+      "pool": "normal",
+      "enemyType": "BUBBLE_FISH",
+      "maxHP": 16,
+      "attackRange": 1.6,
+      "maxSpeed": 1.15,
+      "attackDamage": 5,
+      "attackCooldownTicks": 18,
+      "cost": 6,
+      "unlockTime": 20,
+      "weight": 40
+    },
+    {
+      "pool": "elite",
+      "enemyType": "BUBBLE_FISH",
+      "maxHP": 18,
+      "attackRange": 1.7,
+      "maxSpeed": 1.1,
+      "attackDamage": 5,
+      "attackCooldownTicks": 18,
+      "cost": 3,
+      "unlockTime": 0,
+      "weight": 100
+    },
+    {
+      "pool": "elite",
+      "enemyType": "BUBBLE_FISH",
+      "maxHP": 28,
+      "attackRange": 1.9,
+      "maxSpeed": 1.25,
+      "attackDamage": 7,
+      "attackCooldownTicks": 16,
+      "cost": 6,
+      "unlockTime": 20,
+      "weight": 45
+    },
+    {
+      "pool": "boss",
+      "enemyType": "BUBBLE_FISH",
+      "maxHP": 36,
+      "attackRange": 2,
+      "maxSpeed": 1,
+      "attackDamage": 7,
+      "attackCooldownTicks": 16,
+      "cost": 3,
+      "unlockTime": 0,
+      "weight": 100
+    },
+    {
+      "pool": "boss",
+      "enemyType": "BUBBLE_FISH",
+      "maxHP": 60,
+      "attackRange": 2.2,
+      "maxSpeed": 1.2,
+      "attackDamage": 10,
+      "attackCooldownTicks": 14,
+      "cost": 8,
+      "unlockTime": 30,
+      "weight": 30
+    }
+  ]
+}

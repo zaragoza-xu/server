@@ -1,3 +1,4 @@
+#include <cmath>
 #include <functional>
 #include <memory>
 #include <string>
@@ -35,6 +36,28 @@ static bool frame_has_event(const json &frame,
     }
   }
   return false;
+}
+
+static json first_spawned_enemy(const json &frame) {
+  for (const auto &event : frame.at("data").at("events")) {
+    if (event.at("eventType").get<int>() ==
+            static_cast<int>(Protocol::BattleEventType::ENEMY_SPAWN) &&
+        event.contains("spawnParameter") &&
+        !event.at("spawnParameter").is_null()) {
+      return event.at("spawnParameter").at("enemyEntity");
+    }
+  }
+  return json();
+}
+
+static json direction_to(const json &position) {
+  const double x = position.at("x").get<double>();
+  const double y = position.at("y").get<double>();
+  const double len = std::sqrt(x * x + y * y);
+  if (len <= 0.0) {
+    return json{{"x", 1.0}, {"y", 0.0}};
+  }
+  return json{{"x", x / len}, {"y", y / len}};
 }
 
 static json read_frame_until(const std::shared_ptr<FakeClient> &client,
@@ -168,11 +191,13 @@ TEST(BattleNetworkTest, BattleServer_PlayerBulletHitEnemyBroadcastsDamage) {
         frame, static_cast<int>(Protocol::BattlePushMessageType::BATTLE_START));
   });
   ASSERT_FALSE(startFrame.is_null());
-  ASSERT_FALSE(startFrame.at("data").at("enemyEntities").empty());
+  const json enemy = first_spawned_enemy(startFrame);
+  ASSERT_FALSE(enemy.is_null());
+  const json shootDir = direction_to(enemy.at("position"));
   battle->send_json(json{
       {"type", static_cast<int>(Protocol::BattleRequestType::PLAYER_SHOOT)},
       {"uid", uid},
-      {"direction", {{"x", 0.0}, {"y", 1.0}}}});
+      {"direction", shootDir}});
 
   const json hitFrame = read_frame_until(battle, [](const json &frame) {
     return frame_has_event(frame,
@@ -198,7 +223,7 @@ TEST(BattleNetworkTest, BattleServer_PlayerBulletHitEnemyBroadcastsDamage) {
   EXPECT_TRUE(sawDamage);
 }
 
-TEST(BattleNetworkTest, BattleServer_LastEnemyKilledPushesBattleEnd) {
+TEST(BattleNetworkTest, BattleServer_StartFrameCarriesEnemySpawnEvent) {
   network_tests::MultiServiceHarness harness;
   const std::string uid = network_tests::auth_register_login(harness);
   const int roomId = network_tests::lobby_create_room(harness, uid, 1);
@@ -213,29 +238,12 @@ TEST(BattleNetworkTest, BattleServer_LastEnemyKilledPushesBattleEnd) {
         frame, static_cast<int>(Protocol::BattlePushMessageType::BATTLE_START));
   });
   ASSERT_FALSE(startFrame.is_null());
-  ASSERT_FALSE(startFrame.at("data").at("enemyEntities").empty());
-
-  battle->send_json(json{
-      {"type", static_cast<int>(Protocol::BattleRequestType::PLAYER_SHOOT)},
-      {"uid", uid},
-      {"direction", {{"x", 0.0}, {"y", 1.0}}}});
-  const json firstHit = read_frame_until(battle, [](const json &frame) {
-    return frame_has_event(frame, Protocol::BattleEventType::ENTITY_DAMAGE);
-  });
-  ASSERT_FALSE(firstHit.is_null());
-
-  battle->send_json(json{
-      {"type", static_cast<int>(Protocol::BattleRequestType::PLAYER_SHOOT)},
-      {"uid", uid},
-      {"direction", {{"x", 0.0}, {"y", 1.0}}}});
-  const json endFrame = read_frame_until(battle, [](const json &frame) {
-    return push_messages_contains(
-        frame, static_cast<int>(Protocol::BattlePushMessageType::BATTLE_END));
-  });
-  ASSERT_FALSE(endFrame.is_null());
-  EXPECT_TRUE(
-      frame_has_event(endFrame, Protocol::BattleEventType::ENTITY_DESTROY));
-  EXPECT_TRUE(endFrame.at("data").at("enemyEntities").empty());
+  const json enemy = first_spawned_enemy(startFrame);
+  ASSERT_FALSE(enemy.is_null());
+  EXPECT_EQ(enemy.at("entityType").get<int>(),
+            static_cast<int>(Protocol::EntityType::ENEMY));
+  EXPECT_EQ(enemy.at("enemyType").get<int>(),
+            static_cast<int>(Protocol::BattleEnemyType::BUBBLE_FISH));
 }
 
 } // namespace

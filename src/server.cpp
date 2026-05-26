@@ -1,10 +1,12 @@
 #include "server.h"
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -16,6 +18,7 @@
 #include <asio/use_awaitable.hpp>
 
 #include "channel.h"
+#include "battle_config.h"
 #include "logging.h"
 #include "protocol.h"
 #include "room.h"
@@ -72,6 +75,161 @@ ShopCatalogConfig load_shop_catalog() {
   }
   return default_shop_catalog();
 }
+
+std::string lower(std::string value) {
+  std::transform(value.begin(), value.end(), value.begin(),
+                 [](unsigned char ch) {
+                   return static_cast<char>(std::tolower(ch));
+                 });
+  return value;
+}
+
+std::optional<BattleEnemyPool> parse_pool(const json &value) {
+  if (value.is_number_integer()) {
+    switch (value.get<int>()) {
+    case 0:
+      return BattleEnemyPool::NORMAL;
+    case 1:
+      return BattleEnemyPool::ELITE;
+    case 2:
+      return BattleEnemyPool::BOSS;
+    default:
+      return std::nullopt;
+    }
+  }
+  if (!value.is_string()) {
+    return std::nullopt;
+  }
+
+  const auto text = lower(value.get<std::string>());
+  if (text == "normal") {
+    return BattleEnemyPool::NORMAL;
+  }
+  if (text == "elite") {
+    return BattleEnemyPool::ELITE;
+  }
+  if (text == "boss") {
+    return BattleEnemyPool::BOSS;
+  }
+  return std::nullopt;
+}
+
+std::optional<Protocol::BattleEnemyType> parse_enemy(const json &value) {
+  if (value.is_number_integer()) {
+    if (value.get<int>() ==
+        static_cast<int>(Protocol::BattleEnemyType::BUBBLE_FISH)) {
+      return Protocol::BattleEnemyType::BUBBLE_FISH;
+    }
+    return std::nullopt;
+  }
+  if (!value.is_string()) {
+    return std::nullopt;
+  }
+
+  const auto text = lower(value.get<std::string>());
+  if (text == "bubble_fish" || text == "bubblefish") {
+    return Protocol::BattleEnemyType::BUBBLE_FISH;
+  }
+  return std::nullopt;
+}
+
+template <typename T>
+void read_num(const json &j, const char *key, T &target) {
+  if (j.contains(key) && j.at(key).is_number()) {
+    target = static_cast<T>(j.at(key).get<double>());
+  }
+}
+
+bool valid_battle_config(const BattleConfig &cfg) {
+  return cfg.playerMaxHP > 0 && cfg.frameRate > 0 &&
+         cfg.durationSeconds > 0.0 && cfg.spawnIntervalSeconds > 0.0 &&
+         cfg.baseSpawnBudget > 0.0 && cfg.maxCostFactor > 0.0 &&
+         cfg.spawnRadiusMin >= 0.0 &&
+         cfg.spawnRadiusMax >= cfg.spawnRadiusMin && cfg.battleMax > cfg.battleMin &&
+         cfg.bulletSpeed > 0.0 && cfg.bulletDamage > 0 &&
+         cfg.bulletRadius >= 0.0 && cfg.enemyRadius >= 0.0 &&
+         !cfg.enemies.empty();
+}
+
+bool valid_enemy(const BattleEnemyDef &enemy) {
+  return enemy.maxHP > 0 && enemy.attackRange >= 0.0 && enemy.maxSpeed >= 0.0 &&
+         enemy.attackDamage >= 0 && enemy.attackCooldownTicks >= 0 &&
+         enemy.cost > 0.0 && enemy.unlockTime >= 0.0 && enemy.weight > 0.0;
+}
+
+BattleConfig load_battle_config() {
+  const std::vector<std::filesystem::path> candidates = {
+      "config/battle_config.json", "../config/battle_config.json",
+      "../../config/battle_config.json"};
+
+  for (const auto &path : candidates) {
+    std::ifstream input(path);
+    if (!input.is_open()) {
+      continue;
+    }
+    try {
+      json j;
+      input >> j;
+      BattleConfig cfg = default_battle_config();
+
+      read_num(j, "playerMaxHP", cfg.playerMaxHP);
+      read_num(j, "frameRate", cfg.frameRate);
+      read_num(j, "durationSeconds", cfg.durationSeconds);
+      read_num(j, "spawnIntervalSeconds", cfg.spawnIntervalSeconds);
+      read_num(j, "baseSpawnBudget", cfg.baseSpawnBudget);
+      read_num(j, "difficultyGrowth", cfg.difficultyGrowth);
+      read_num(j, "maxCostFactor", cfg.maxCostFactor);
+      read_num(j, "spawnRadiusMin", cfg.spawnRadiusMin);
+      read_num(j, "spawnRadiusMax", cfg.spawnRadiusMax);
+      read_num(j, "battleMin", cfg.battleMin);
+      read_num(j, "battleMax", cfg.battleMax);
+      read_num(j, "bulletSpeed", cfg.bulletSpeed);
+      read_num(j, "bulletDamage", cfg.bulletDamage);
+      read_num(j, "bulletRadius", cfg.bulletRadius);
+      read_num(j, "enemyRadius", cfg.enemyRadius);
+
+      if (j.contains("enemies") && j.at("enemies").is_array()) {
+        std::vector<BattleEnemyDef> enemies;
+        for (const auto &entry : j.at("enemies")) {
+          if (!entry.is_object() || !entry.contains("pool") ||
+              !entry.contains("enemyType")) {
+            continue;
+          }
+          auto pool = parse_pool(entry.at("pool"));
+          auto enemyType = parse_enemy(entry.at("enemyType"));
+          if (!pool.has_value() || !enemyType.has_value()) {
+            continue;
+          }
+
+          BattleEnemyDef enemy;
+          enemy.pool = *pool;
+          enemy.enemyType = *enemyType;
+          read_num(entry, "maxHP", enemy.maxHP);
+          read_num(entry, "attackRange", enemy.attackRange);
+          read_num(entry, "maxSpeed", enemy.maxSpeed);
+          read_num(entry, "attackDamage", enemy.attackDamage);
+          read_num(entry, "attackCooldownTicks", enemy.attackCooldownTicks);
+          read_num(entry, "cost", enemy.cost);
+          read_num(entry, "unlockTime", enemy.unlockTime);
+          read_num(entry, "weight", enemy.weight);
+          if (valid_enemy(enemy)) {
+            enemies.push_back(enemy);
+          }
+        }
+        if (!enemies.empty()) {
+          cfg.enemies = std::move(enemies);
+        }
+      }
+
+      if (valid_battle_config(cfg)) {
+        return cfg;
+      }
+    } catch (...) {
+      continue;
+    }
+  }
+  return default_battle_config();
+}
 } // namespace
 
 Server::Server(asio::io_context &context, int port,
@@ -86,6 +244,9 @@ Server::Server(asio::io_context &context, int port,
     const auto cfg = load_shop_catalog();
     state->shopCatalogVersion = cfg.version;
     state->shopCatalogItemIds = cfg.itemIds;
+  }
+  if (state->battleConfig.enemies.empty()) {
+    state->battleConfig = load_battle_config();
   }
 }
 
