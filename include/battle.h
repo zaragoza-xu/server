@@ -1,30 +1,44 @@
 #pragma once
 
+#include <cmath>
 #include <optional>
+#include <unordered_set>
 #include <utility>
 
 #include "types.h"
 
-namespace Protocol {
-
-// ===== 战斗实体基础 =====
-
-enum class EntityType {
-  PLAYER = 0,
-  ENEMY = 1,
-  PLAYER_BULLET = 10,
-  ENEMY_BULLET = 11,
-  WALL = 20,
-
-  NONE = 999,
-};
-
+namespace Battle {
 struct BattleVector2 {
   double x = 0.0;
   double y = 0.0;
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(BattleVector2, x, y)
 };
+inline double distance_squared(const BattleVector2 &lhs,
+                               const BattleVector2 &rhs) {
+  const double dx = lhs.x - rhs.x;
+  const double dy = lhs.y - rhs.y;
+  return dx * dx + dy * dy;
+}
 
+inline double length_squared(const BattleVector2 &value) {
+  return value.x * value.x + value.y * value.y;
+}
+
+inline BattleVector2 norm_or_zero(const BattleVector2 &value) {
+  const double lengthSquared = length_squared(value);
+  if (!std::isfinite(lengthSquared) || lengthSquared <= 0.0) {
+    return {0.0, 0.0};
+  }
+  const double length = std::sqrt(lengthSquared);
+  return {value.x / length, value.y / length};
+}
+
+}; // namespace Battle
+
+namespace Protocol {
+using Battle::BattleVector2;
+
+// ===== 战斗实体基础 =====
 struct BattleEntity {
   int entityId = 0;
   EntityType entityType = EntityType::PLAYER;
@@ -44,16 +58,26 @@ struct BattlePlayerAttribute {
                                               currentHP, maxHP);
 };
 
+struct BattleWeaponInfo {
+  std::string weaponId;
+  WeaponType weaponType = WeaponType::RANGED;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(BattleWeaponInfo, weaponId,
+                                              weaponType)
+};
+
 struct BattlePlayerEntity : BattleEntity {
   std::string uid;
   BattlePlayerAttribute attribute;
   std::vector<std::string> items; // 已拥有道具的 ID
+  std::optional<BattleWeaponInfo> weapon;
 };
 inline void to_json(json &j, const BattlePlayerEntity &e) {
   to_json(j, static_cast<const BattleEntity &>(e));
   j["uid"] = e.uid;
   j["attribute"] = e.attribute;
   j["items"] = e.items;
+  j["weapon"] = e.weapon ? json(e.weapon.value()) : json(nullptr);
 }
 inline void from_json(const json &j, BattlePlayerEntity &e) {
   from_json(j, static_cast<BattleEntity &>(e));
@@ -63,6 +87,9 @@ inline void from_json(const json &j, BattlePlayerEntity &e) {
     j.at("attribute").get_to(e.attribute);
   if (j.contains("items"))
     j.at("items").get_to(e.items);
+  e.weapon.reset();
+  if (j.contains("weapon") && !j["weapon"].is_null())
+    e.weapon = j["weapon"].get<BattleWeaponInfo>();
 }
 
 struct BattleInfo {
@@ -74,34 +101,46 @@ struct BattleInfo {
 };
 
 // ===== 中立相关 =====
+struct BattleProjectileInfo {
+  std::string projectilePrefab;
+  double speed = 0.0;
+  double size = 0.0;
+  std::string sprite;
 
-enum class BattleBulletType {
-  SELF_BULLET = 0,
-  PLAYER_BULLET = 1,
-  ENEMY_BULLET = 2
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(BattleProjectileInfo,
+                                              projectilePrefab, speed, size,
+                                              sprite)
 };
+
 struct BattleBulletEntity : BattleEntity {
   BattleBulletType type = BattleBulletType::SELF_BULLET;
+  std::string weaponId;
+  BattleProjectileInfo projectile;
 };
 inline void to_json(json &j, const BattleBulletEntity &e) {
   to_json(j, static_cast<const BattleEntity &>(e));
   j["type"] = e.type;
+  j["weaponId"] = e.weaponId;
+  j["projectile"] = e.projectile;
 }
 inline void from_json(const json &j, BattleBulletEntity &e) {
   from_json(j, static_cast<BattleEntity &>(e));
   if (j.contains("type"))
     j.at("type").get_to(e.type);
+  if (j.contains("weaponId"))
+    j.at("weaponId").get_to(e.weaponId);
+  if (j.contains("projectile"))
+    j.at("projectile").get_to(e.projectile);
 }
 
 // ===== 敌人相关 =====
 
-enum class BattleEnemyType { BUBBLE_FISH = 0 };
-
 struct BattleEnemyAttribute {
   int currentHP = 0;
   int maxHP = 0;
+  double knockbackResist = 0.0;
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(BattleEnemyAttribute, currentHP,
-                                              maxHP)
+                                              maxHP, knockbackResist)
 };
 
 struct BattleEnemyEntity : BattleEntity {
@@ -124,24 +163,6 @@ inline void from_json(const json &j, BattleEnemyEntity &e) {
   if (j.contains("targetPlayerUid"))
     j.at("targetPlayerUid").get_to(e.targetPlayerUid);
 }
-
-enum class BattleRequestType {
-  PLAYER_READY = 0,
-  POSITION_SYNC = 1,
-  PLAYER_SHOOT = 2,
-  ERROR = 100,
-};
-
-enum class BattleResponseType {
-  BATTLE_WAIT = 0,
-  BATTLE_FRAME = 1,
-  ERROR = 100,
-};
-
-enum BattlePushMessageType {
-  BATTLE_START = 0,
-  BATTLE_END = 1,
-};
 
 struct BattlePlayerReadyReq {
   BattleRequestType type;
@@ -175,30 +196,6 @@ struct BattlePlayerShootReq {
   BattleVector2 direction;
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(BattlePlayerShootReq, type, uid,
                                               direction)
-};
-
-enum class BattleEventType {
-  ENEMY_SPAWN = 0,
-  BULLET_SPAWN = 1,
-
-  BULLET_HIT_ENEMY = 10,
-  BULLET_HIT_PLAYER = 11,
-  BULLET_HIT_WALL = 12,
-
-  ENTITY_DAMAGE = 20,
-  ENTITY_DESTROY = 21,
-
-  ENEMY_INTENT_CHANGE = 30,
-};
-
-enum class BattleEntityDestroyReason {
-  UNKNOWN = 0,
-  BULLET_HIT_ENTITY = 1,
-  BULLET_HIT_WALL = 2,
-  BULLET_TIMEOUT = 3,
-
-  ENTITY_DEAD = 10,
-  ENTITY_SELF_EXPLODE = 11,
 };
 
 // Only the parameter matching eventType should be populated.
@@ -366,3 +363,75 @@ struct BattleFrameRsp {
                                               bulletEntities, events);
 };
 } // namespace Protocol
+
+namespace Battle {
+struct EnemySpawnSpec {
+  Protocol::BattleEnemyType enemyType = Protocol::BattleEnemyType::BUBBLE_FISH;
+  Battle::BattleVector2 position;
+  int maxHP = 10;
+  double attackRange = 1.5;
+  double maxSpeed = 1.0;
+  double knockbackResist = 0.0;
+  int attackDamage = 4;
+  int attackCooldownTicks = 20;
+  double cost = 1.0;
+  double unlockTime = 0.0;
+  double weight = 1.0;
+};
+
+struct ProjectileDef {
+  double speed = 0.0;
+  double lifetime = 0.0;
+  double size = 0.0;
+  bool canPierce = false;
+  int pierceCount = 0;
+  double pierceDamageFactor = 0.75;
+  bool canBounce = false;
+  int bounceCount = 0;
+  bool explosion = false;
+  double explosionRadius = 0.0;
+  std::string sprite;
+};
+
+struct WeaponDef {
+  std::string weaponId;
+  std::string weaponName;
+  std::string icon;
+  Protocol::WeaponType weaponType = Protocol::WeaponType::RANGED;
+  double damage = 0.0;
+  double attackSpeed = 0.0;
+  double range = 0.0;
+  double knockback = 0.0;
+  double damageGrowth = 0.0;
+  double attackSpeedGrowth = 0.0;
+  double critChance = 0.0;
+  double critMultiplier = 1.0;
+  double lifeSteal = 0.0;
+  std::string projectilePrefab;
+  int projectileCount = 0;
+  ProjectileDef projectile;
+  std::vector<std::string> tags;
+};
+
+struct EnemyState {
+  Protocol::BattleEnemyEntity entity;
+  double attackRange = 1.5;
+  double maxSpeed = 1.0;
+  double knockbackResist = 0.0;
+  int attackDamage = 4;
+  int attackCooldownTicks = 20;
+  int nextAttackTick = 0;
+};
+
+struct BulletState {
+  Protocol::BattleBulletEntity entity;
+  std::string sourceUid;
+  int damage = 5;
+  int remainingPierce = 0;
+  double pierceScale = 1.0;
+  double pierceDamageFactor = 0.75;
+  double rangeLeft = 0.0;
+  Battle::WeaponDef weapon;
+  std::unordered_set<int> hitEnemyIds;
+};
+} // namespace Battle

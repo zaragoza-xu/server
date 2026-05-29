@@ -32,7 +32,7 @@ struct ServerState {
   std::unordered_map<int, std::shared_ptr<Room>> rooms;
   std::vector<std::string> shopCatalogItemIds;
   std::string shopCatalogVersion = "v1";
-  BattleConfig battleConfig;
+  Battle::BattleConfig battleConfig;
   std::mutex usersMutex;
   std::mutex roomsMutex;
   std::mutex userDataMutex;

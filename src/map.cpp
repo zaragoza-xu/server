@@ -4,9 +4,8 @@
 #include <utility>
 #include <vector>
 
-using namespace Protocol;
-
 namespace {
+using namespace Protocol;
 
 struct TowerMap {
 
