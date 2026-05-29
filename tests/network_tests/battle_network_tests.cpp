@@ -6,7 +6,6 @@
 #include <gtest/gtest.h>
 
 #include "integration_helpers.h"
-#include "protocol.h"
 
 namespace {
 
@@ -58,6 +57,45 @@ static json direction_to(const json &position) {
     return json{{"x", 1.0}, {"y", 0.0}};
   }
   return json{{"x", x / len}, {"y", y / len}};
+}
+
+static Battle::WeaponDef test_gun() {
+  Battle::WeaponDef weapon;
+  weapon.weaponId = "test_gun";
+  weapon.weaponName = "test gun";
+  weapon.weaponType = Protocol::WeaponType::RANGED;
+  weapon.damage = 5.0;
+  weapon.attackSpeed = 0.0;
+  weapon.range = 5000.0;
+  weapon.critMultiplier = 1.0;
+  weapon.projectileCount = 1;
+  weapon.projectile.speed = 1.0;
+  weapon.projectile.size = 0.25;
+  weapon.tags = {"weapon", "ranged", "test"};
+  return weapon;
+}
+
+static void use_test_gun(network_tests::MultiServiceHarness &harness) {
+  auto state = harness.get_state();
+  state->shopCatalogItemIds = {"test_gun"};
+  state->battleConfig = Battle::default_battle_config();
+  state->battleConfig.weapons = {test_gun()};
+}
+
+static void enter_map_with_test_gun(network_tests::MultiServiceHarness &harness,
+                                    int roomId, const std::string &uid) {
+  network_tests::lobby_ready(harness, uid);
+
+  auto shop = harness.make_shop_client();
+  shop->send_json(
+      json{{"type", static_cast<int>(Protocol::ShopRequestType::SHOP_BUY)},
+           {"uid", uid},
+           {"itemId", "test_gun"}});
+  const json buyPush = shop->read_json();
+  ASSERT_EQ(buyPush.at("type").get<int>(),
+            static_cast<int>(Protocol::ShopResponseType::SHOP_SYNC));
+
+  network_tests::select_first_map_node(harness, roomId, {uid});
 }
 
 static json read_frame_until(const std::shared_ptr<FakeClient> &client,
@@ -150,9 +188,10 @@ TEST(BattleNetworkTest, BattlePlayerReadyWhenNotInRoomReturnsRoomStateError) {
 
 TEST(BattleNetworkTest, BattleServer_PlayerShootBroadcastsSpawn) {
   network_tests::MultiServiceHarness harness;
+  use_test_gun(harness);
   const std::string uid = network_tests::auth_register_login(harness);
   const int roomId = network_tests::lobby_create_room(harness, uid, 1);
-  network_tests::enter_map(harness, roomId, {uid});
+  enter_map_with_test_gun(harness, roomId, uid);
 
   auto battle = harness.make_battle_client();
   battle->send_json(json{
@@ -163,6 +202,14 @@ TEST(BattleNetworkTest, BattleServer_PlayerShootBroadcastsSpawn) {
         frame, static_cast<int>(Protocol::BattlePushMessageType::BATTLE_START));
   });
   ASSERT_FALSE(startFrame.is_null());
+  ASSERT_FALSE(startFrame.at("data").at("playerEntities").empty());
+  const auto &weapon =
+      startFrame.at("data").at("playerEntities").front().at("weapon");
+  EXPECT_EQ(weapon.at("weaponId").get<std::string>(), "test_gun");
+  EXPECT_EQ(weapon.at("weaponType").get<int>(),
+            static_cast<int>(Protocol::WeaponType::RANGED));
+  EXPECT_FALSE(weapon.contains("damage"));
+  EXPECT_FALSE(weapon.contains("projectile"));
 
   battle->send_json(json{
       {"type", static_cast<int>(Protocol::BattleRequestType::PLAYER_SHOOT)},
@@ -174,13 +221,27 @@ TEST(BattleNetworkTest, BattleServer_PlayerShootBroadcastsSpawn) {
   ASSERT_FALSE(shootFrame.is_null());
   EXPECT_TRUE(
       frame_has_event(shootFrame, Protocol::BattleEventType::BULLET_SPAWN));
+  for (const auto &event : shootFrame.at("data").at("events")) {
+    if (event.at("eventType").get<int>() !=
+        static_cast<int>(Protocol::BattleEventType::BULLET_SPAWN)) {
+      continue;
+    }
+    const auto &projectile =
+        event.at("spawnParameter").at("bulletEntity").at("projectile");
+    EXPECT_TRUE(projectile.contains("speed"));
+    EXPECT_TRUE(projectile.contains("size"));
+    EXPECT_FALSE(projectile.contains("canPierce"));
+    EXPECT_FALSE(projectile.contains("pierceCount"));
+    break;
+  }
 }
 
 TEST(BattleNetworkTest, BattleServer_PlayerBulletHitEnemyBroadcastsDamage) {
   network_tests::MultiServiceHarness harness;
+  use_test_gun(harness);
   const std::string uid = network_tests::auth_register_login(harness);
   const int roomId = network_tests::lobby_create_room(harness, uid, 1);
-  network_tests::enter_map(harness, roomId, {uid});
+  enter_map_with_test_gun(harness, roomId, uid);
 
   auto battle = harness.make_battle_client();
   battle->send_json(json{

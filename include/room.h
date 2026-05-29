@@ -21,35 +21,6 @@ struct ServerState;
 
 class Room {
 private:
-  struct BattleEnemyState {
-    Protocol::BattleEnemyEntity entity;
-    double attackRange = 1.5;
-    double maxSpeed = 1.0;
-    int attackDamage = 4;
-    int attackCooldownTicks = 20;
-    int nextAttackTick = 0;
-  };
-
-  struct BulletState {
-    Protocol::BattleBulletEntity entity;
-    int sourcePlayerId = 0;
-    int damage = 5;
-  };
-
-  struct EnemySpawnSpec {
-    Protocol::BattleEnemyType enemyType =
-        Protocol::BattleEnemyType::BUBBLE_FISH;
-    Protocol::BattleVector2 position;
-    int maxHP = 10;
-    double attackRange = 1.5;
-    double maxSpeed = 1.0;
-    int attackDamage = 4;
-    int attackCooldownTicks = 20;
-    double cost = 1.0;
-    double unlockTime = 0.0;
-    double weight = 1.0;
-  };
-
   enum class Phase { LOBBY, SHOP, MAP, BATTLE, END };
 
   std::weak_ptr<ServerState> state;
@@ -72,14 +43,16 @@ private:
   std::unordered_map<std::string, int> selectedMapNodeByUid;
 
   // battle info
-  BattleConfig battleConfig = default_battle_config();
+  Battle::BattleConfig battleConfig = Battle::default_battle_config();
   std::unordered_map<std::string, bool> battleReadyStates;
   std::unordered_map<std::string, Protocol::BattlePlayerEntity>
       battlePlayersByUid;
-  std::unordered_map<int, BattleEnemyState> battleEnemyStates;
+  std::unordered_map<std::string, Battle::WeaponDef> battleWeaponsByUid;
+  std::unordered_map<int, Battle::EnemyState> battleEnemyStates;
   std::unordered_map<std::string, std::unordered_map<int, Protocol::BattlePos>>
       enemyPosByUid;
-  std::vector<BulletState> battleBullets;
+  std::unordered_map<std::string, int> nextAttackTickByUid;
+  std::vector<Battle::BulletState> battleBullets;
   std::vector<Protocol::BattleEventDTO> pendingBattleEvents;
   int battleTick = 0;
   int nextBattleEntityId = 1;
@@ -123,6 +96,39 @@ private:
     pendingBattleEvents.push_back(std::move(event));
   }
 
+  bool is_outside_battle(const Battle::BattleVector2 &position) {
+    return position.x < battleConfig.battleMin ||
+           position.x > battleConfig.battleMax ||
+           position.y < battleConfig.battleMin ||
+           position.y > battleConfig.battleMax;
+  }
+
+  Battle::BattleVector2 clamp_battle(Battle::BattleVector2 position) {
+    position.x =
+        std::clamp(position.x, battleConfig.battleMin, battleConfig.battleMax);
+    position.y =
+        std::clamp(position.y, battleConfig.battleMin, battleConfig.battleMax);
+    return position;
+  }
+
+  Battle::BattleVector2 step_to(const Battle::BattleVector2 &from,
+                                const Battle::BattleVector2 &to,
+                                double maxDistance) {
+    // Server-side movement is capped even when clients report a far-away
+    // target.
+    const Battle::BattleVector2 delta{to.x - from.x, to.y - from.y};
+    const double distSquared = length_squared(delta);
+    if (!std::isfinite(distSquared) || distSquared <= 0.0) {
+      return clamp_battle(from);
+    }
+    if (distSquared <= maxDistance * maxDistance) {
+      return clamp_battle(to);
+    }
+    const double dist = std::sqrt(distSquared);
+    return clamp_battle({from.x + delta.x / dist * maxDistance,
+                         from.y + delta.y / dist * maxDistance});
+  }
+
   int get_item_index(const std::string &itemId) const;
   int get_map_node_index(int nodeId) const;
   bool all_lobby_ready_locked() const;
@@ -135,22 +141,40 @@ private:
   Protocol::MapNode::NodeType resolve_map_node_type_locked() const;
   double battle_time_locked() const;
   double battle_difficulty_locked() const;
-  std::vector<EnemySpawnSpec> enemy_pool_locked(double time,
-                                                double difficulty) const;
-  std::optional<EnemySpawnSpec>
-  pick_enemy_locked(const std::vector<EnemySpawnSpec> &pool, double budget);
-  Protocol::BattleVector2 spawn_pos_locked();
-  void spawn_enemies_locked(const std::vector<EnemySpawnSpec> &spawns);
+  std::vector<Battle::EnemySpawnSpec>
+  enemy_pool_locked(double time, double difficulty) const;
+  std::optional<Battle::EnemySpawnSpec>
+  pick_enemy_locked(const std::vector<Battle::EnemySpawnSpec> &pool,
+                    double budget);
+  Battle::BattleVector2 spawn_pos_locked();
+  void spawn_enemies_locked(const std::vector<Battle::EnemySpawnSpec> &spawns);
   void tick_spawn_locked();
   bool has_enemy_locked(int entityId) const;
   bool all_players_dead_locked() const;
+  const Battle::WeaponDef *
+  equip_weapon_locked(const std::vector<std::string> &items) const;
+  const Battle::WeaponDef *equipped_weapon_locked(const std::string &uid) const;
+  int weapon_damage_locked(const Battle::WeaponDef &weapon);
+  int cooldown_ticks_locked(const Battle::WeaponDef &weapon) const;
+  double battle_range(const Battle::WeaponDef &weapon) const;
+  void lifesteal_locked(const std::string &uid, int damage,
+                        const Battle::WeaponDef &weapon);
+  void hit_enemy_locked(Protocol::BattleEnemyEntity &enemy, int hitSourceId,
+                        Protocol::EntityType hitSourceType,
+                        Protocol::BattlePlayerEntity &player,
+                        const Battle::BattleVector2 &hitPosition,
+                        const Battle::WeaponDef &weapon, int damage,
+                        EventType hitType);
+  void melee_attack_locked(Protocol::BattlePlayerEntity &player,
+                           const Battle::WeaponDef &weapon,
+                           const Battle::BattleVector2 &direction);
   Protocol::BattlePlayerEntity *live_player_locked(const std::string &uid);
   void apply_enemy_reports_locked();
   void tick_bullets_locked();
   void tick_enemy_attacks_locked();
   void end_battle_locked(bool won);
-  bool update_target_locked(BattleEnemyState &enemyState);
-  void push_enemy_intent_locked(const BattleEnemyState &enemyState);
+  bool update_target_locked(Battle::EnemyState &enemyState);
+  void push_enemy_intent_locked(const Battle::EnemyState &enemyState);
   void start_battle_locked();
 
 public:
@@ -179,11 +203,11 @@ public:
   bool set_battle_ready(const std::string &uid, Protocol::BattleWaitRsp &rsp,
                         bool &allReady);
   bool sync_battle(const std::string &uid,
-                   const Protocol::BattleVector2 &playerPosition,
-                   const Protocol::BattleVector2 &playerDirection,
+                   const Battle::BattleVector2 &playerPosition,
+                   const Battle::BattleVector2 &playerDirection,
                    const std::vector<Protocol::BattlePos> &enemyPositions);
   bool shoot_battle_player(const std::string &uid,
-                           const Protocol::BattleVector2 &direction);
+                           const Battle::BattleVector2 &direction);
   bool tick_battle(Protocol::BattleFrameRsp &frame, bool *ended = nullptr);
 
   bool set_member_ready(const std::string &uid, bool ready);

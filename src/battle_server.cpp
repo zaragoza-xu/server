@@ -35,7 +35,7 @@ asio::awaitable<void> BattleServer::tick_loop() {
     const int frameRate =
         (sharedState && sharedState->battleConfig.frameRate > 0)
             ? sharedState->battleConfig.frameRate
-            : default_battle_config().frameRate;
+            : Battle::default_battle_config().frameRate;
     tickTimer.expires_after(
         std::chrono::milliseconds(std::max(1, 1000 / frameRate)));
     std::error_code ec;
