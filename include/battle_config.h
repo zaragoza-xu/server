@@ -71,7 +71,6 @@ inline BattleConfig default_battle_config() {
     Battle::WeaponDef weapon;
     weapon.weaponId = "knife_" + std::to_string(i + 1);
     weapon.weaponName = "knife";
-    weapon.weaponType = Protocol::WeaponType::MELEE;
     weapon.damage = knifeDamages[i];
     weapon.attackSpeed = knifeSpeeds[i];
     weapon.range = 150.0;
@@ -90,7 +89,6 @@ inline BattleConfig default_battle_config() {
     Battle::WeaponDef weapon;
     weapon.weaponId = "pistol_" + std::to_string(i + 1);
     weapon.weaponName = "pistol";
-    weapon.weaponType = Protocol::WeaponType::RANGED;
     weapon.damage = pistolDamages[i];
     weapon.attackSpeed = pistolSpeeds[i];
     weapon.range = 500.0;
@@ -98,7 +96,6 @@ inline BattleConfig default_battle_config() {
     weapon.damageGrowth = 1.00;
     weapon.critChance = pistolCrits[i];
     weapon.critMultiplier = 2.0;
-    weapon.projectilePrefab = "pistol_bullet";
     weapon.projectileCount = 1;
     weapon.projectile.speed = cfg.bulletSpeed;
     weapon.projectile.lifetime = weapon.range / 100.0 / cfg.bulletSpeed;

@@ -161,11 +161,6 @@ enum class BattleBulletType {
   ENEMY_BULLET = 2
 };
 
-enum class WeaponType {
-  MELEE = 0,
-  RANGED = 1,
-};
-
 enum class BattleEventType {
   ENEMY_SPAWN = 0,
   BULLET_SPAWN = 1,

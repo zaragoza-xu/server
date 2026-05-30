@@ -13,17 +13,9 @@ bool is_valid_vector(const BattleVector2 &value) {
   return std::isfinite(value.x) && std::isfinite(value.y);
 }
 
-Protocol::BattleWeaponInfo weapon_info(const Battle::WeaponDef &weapon) {
-  return {.weaponId = weapon.weaponId, .weaponType = weapon.weaponType};
-}
-
-Protocol::BattleProjectileInfo
-projectile_info(const Battle::WeaponDef &weapon,
-                const Battle::ProjectileDef &projectile) {
-  return {.projectilePrefab = weapon.projectilePrefab,
-          .speed = projectile.speed,
-          .size = projectile.size,
-          .sprite = projectile.sprite};
+Protocol::BattleBulletAttribute
+bullet_attribute(const Battle::ProjectileDef &projectile) {
+  return {.speed = projectile.speed, .size = projectile.size};
 }
 } // namespace
 
@@ -87,7 +79,7 @@ void Room::start_battle_locked() {
       player.items = ownedIt->second;
       auto weapon = equip_weapon_locked(player.items);
       if (weapon != nullptr) {
-        player.weapon = weapon_info(*weapon);
+        player.weaponId = weapon->weaponId;
         battleWeaponsByUid.emplace(uid, std::move(*weapon));
       }
     }
@@ -261,8 +253,8 @@ void Room::tick_bullets_locked() {
 
   for (auto &bulletState : battleBullets) {
     auto &bullet = bulletState.entity;
-    const double bulletRadius = bullet.projectile.size > 0.0
-                                    ? bullet.projectile.size
+    const double bulletRadius = bullet.attribute.size > 0.0
+                                    ? bullet.attribute.size
                                     : battleConfig.bulletRadius;
     const double hitRadius = bulletRadius + battleConfig.enemyRadius;
     const double hitDistanceSquared = hitRadius * hitRadius;
@@ -464,13 +456,12 @@ bool Room::shoot_battle_player(const std::string &uid,
   const auto attackDir = Battle::norm_or_zero(direction);
 
   nextAttackTickByUid[uid] = battleTick + cooldown_ticks_locked(*weapon);
-  if (weapon->weaponType == Protocol::WeaponType::MELEE) {
+  if (weapon->projectileCount == 0) {
     melee_attack_locked(*player, *weapon, attackDir);
     return true;
 
-  } else if (weapon->weaponType == Protocol::WeaponType::RANGED) {
-    const int projectileCount = std::max(1, weapon->projectileCount);
-    for (int index = 0; index < projectileCount; ++index) {
+  } else {
+    for (int index = 0; index < weapon->projectileCount; ++index) {
       Battle::BulletState bulletState;
       auto &bullet = bulletState.entity;
       bullet.entityId = nextBattleEntityId++;
@@ -487,7 +478,7 @@ bool Room::shoot_battle_player(const std::string &uid,
       bulletState.damage = weapon_damage_locked(*weapon);
       bulletState.rangeLeft = battle_range(*weapon);
       bullet.weaponId = weapon->weaponId;
-      bullet.projectile = projectile_info(*weapon, projectile);
+      bullet.attribute = bullet_attribute(projectile);
       bulletState.weapon = *weapon;
       bulletState.remainingPierce =
           projectile.canPierce ? projectile.pierceCount : 0;

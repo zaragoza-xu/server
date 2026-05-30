@@ -91,7 +91,6 @@ Room::enemy_pool_locked(double time, double difficulty) const {
     spec.maxHP = def.maxHP;
     spec.attackRange = def.attackRange;
     spec.maxSpeed = def.maxSpeed;
-    spec.knockbackResist = def.knockbackResist;
     spec.attackDamage = def.attackDamage;
     spec.attackCooldownTicks = def.attackCooldownTicks;
     spec.cost = def.cost;
@@ -211,10 +210,8 @@ void Room::spawn_enemies_locked(
     enemyState.entity.direction = Battle::BattleVector2{0.0, 0.0};
     enemyState.entity.attribute.maxHP = spec.maxHP;
     enemyState.entity.attribute.currentHP = spec.maxHP;
-    enemyState.entity.attribute.knockbackResist = spec.knockbackResist;
     enemyState.attackRange = spec.attackRange;
     enemyState.maxSpeed = spec.maxSpeed;
-    enemyState.knockbackResist = spec.knockbackResist;
     enemyState.attackDamage = spec.attackDamage;
     enemyState.attackCooldownTicks = spec.attackCooldownTicks;
     // Initial target is part of the spawn frame so clients can animate at once.

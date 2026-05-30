@@ -134,31 +134,6 @@ std::optional<Protocol::BattleEnemyType> parse_enemy(const json &value) {
   return std::nullopt;
 }
 
-std::optional<Protocol::WeaponType> parse_weapon_type(const json &value) {
-  if (value.is_number_integer()) {
-    switch (value.get<int>()) {
-    case static_cast<int>(Protocol::WeaponType::MELEE):
-      return Protocol::WeaponType::MELEE;
-    case static_cast<int>(Protocol::WeaponType::RANGED):
-      return Protocol::WeaponType::RANGED;
-    default:
-      return std::nullopt;
-    }
-  }
-  if (!value.is_string()) {
-    return std::nullopt;
-  }
-
-  const auto text = lower(value.get<std::string>());
-  if (text == "melee") {
-    return Protocol::WeaponType::MELEE;
-  }
-  if (text == "ranged") {
-    return Protocol::WeaponType::RANGED;
-  }
-  return std::nullopt;
-}
-
 template <typename T> void read_num(const json &j, const char *key, T &target) {
   if (j.contains(key) && j.at(key).is_number()) {
     target = static_cast<T>(j.at(key).get<double>());
@@ -197,8 +172,6 @@ bool valid_enemy(const BattleEnemyDef &enemy) {
 
 bool valid_weapon(const Battle::WeaponDef &weapon) {
   const auto &projectile = weapon.projectile;
-  const bool projectileOk = weapon.weaponType != Protocol::WeaponType::RANGED ||
-                            weapon.projectileCount > 0;
   return !weapon.weaponId.empty() && !weapon.weaponName.empty() &&
          weapon.damage >= 0.0 && weapon.attackSpeed >= 0.0 &&
          weapon.range >= 0.0 && weapon.knockback >= 0.0 &&
@@ -208,8 +181,7 @@ bool valid_weapon(const Battle::WeaponDef &weapon) {
          weapon.projectileCount >= 0 && projectile.speed >= 0.0 &&
          projectile.lifetime >= 0.0 && projectile.size >= 0.0 &&
          projectile.pierceCount >= 0 && projectile.pierceDamageFactor >= 0.0 &&
-         projectile.bounceCount >= 0 && projectile.explosionRadius >= 0.0 &&
-         projectileOk;
+         projectile.bounceCount >= 0 && projectile.explosionRadius >= 0.0;
 }
 
 void read_projectile(const json &j, Battle::ProjectileDef &projectile) {
@@ -223,16 +195,10 @@ void read_projectile(const json &j, Battle::ProjectileDef &projectile) {
   read_num(j, "bounceCount", projectile.bounceCount);
   read_bool(j, "explosion", projectile.explosion);
   read_num(j, "explosionRadius", projectile.explosionRadius);
-  read_str(j, "sprite", projectile.sprite);
 }
 
 std::optional<Battle::WeaponDef> read_weapon(const json &entry) {
-  if (!entry.is_object() || !entry.contains("weaponId") ||
-      !entry.contains("weaponType")) {
-    return std::nullopt;
-  }
-  auto weaponType = parse_weapon_type(entry.at("weaponType"));
-  if (!weaponType.has_value()) {
+  if (!entry.is_object() || !entry.contains("weaponId")) {
     return std::nullopt;
   }
 
@@ -240,7 +206,6 @@ std::optional<Battle::WeaponDef> read_weapon(const json &entry) {
   read_str(entry, "weaponId", weapon.weaponId);
   read_str(entry, "weaponName", weapon.weaponName);
   read_str(entry, "icon", weapon.icon);
-  weapon.weaponType = *weaponType;
   read_num(entry, "damage", weapon.damage);
   read_num(entry, "attackSpeed", weapon.attackSpeed);
   read_num(entry, "range", weapon.range);
@@ -250,7 +215,6 @@ std::optional<Battle::WeaponDef> read_weapon(const json &entry) {
   read_num(entry, "critChance", weapon.critChance);
   read_num(entry, "critMultiplier", weapon.critMultiplier);
   read_num(entry, "lifeSteal", weapon.lifeSteal);
-  read_str(entry, "projectilePrefab", weapon.projectilePrefab);
   read_num(entry, "projectileCount", weapon.projectileCount);
 
   if (entry.contains("projectile") && entry.at("projectile").is_object()) {

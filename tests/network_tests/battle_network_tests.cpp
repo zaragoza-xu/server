@@ -63,7 +63,6 @@ static Battle::WeaponDef test_gun() {
   Battle::WeaponDef weapon;
   weapon.weaponId = "test_gun";
   weapon.weaponName = "test gun";
-  weapon.weaponType = Protocol::WeaponType::RANGED;
   weapon.damage = 5.0;
   weapon.attackSpeed = 0.0;
   weapon.range = 5000.0;
@@ -203,13 +202,10 @@ TEST(BattleNetworkTest, BattleServer_PlayerShootBroadcastsSpawn) {
   });
   ASSERT_FALSE(startFrame.is_null());
   ASSERT_FALSE(startFrame.at("data").at("playerEntities").empty());
-  const auto &weapon =
-      startFrame.at("data").at("playerEntities").front().at("weapon");
-  EXPECT_EQ(weapon.at("weaponId").get<std::string>(), "test_gun");
-  EXPECT_EQ(weapon.at("weaponType").get<int>(),
-            static_cast<int>(Protocol::WeaponType::RANGED));
-  EXPECT_FALSE(weapon.contains("damage"));
-  EXPECT_FALSE(weapon.contains("projectile"));
+  const auto &player = startFrame.at("data").at("playerEntities").front();
+  EXPECT_EQ(player.at("weaponId").get<std::string>(), "test_gun");
+  EXPECT_FALSE(player.contains("weapon"));
+  EXPECT_FALSE(player.contains("weaponType"));
 
   battle->send_json(json{
       {"type", static_cast<int>(Protocol::BattleRequestType::PLAYER_SHOOT)},
@@ -226,12 +222,15 @@ TEST(BattleNetworkTest, BattleServer_PlayerShootBroadcastsSpawn) {
         static_cast<int>(Protocol::BattleEventType::BULLET_SPAWN)) {
       continue;
     }
-    const auto &projectile =
-        event.at("spawnParameter").at("bulletEntity").at("projectile");
-    EXPECT_TRUE(projectile.contains("speed"));
-    EXPECT_TRUE(projectile.contains("size"));
-    EXPECT_FALSE(projectile.contains("canPierce"));
-    EXPECT_FALSE(projectile.contains("pierceCount"));
+    const auto &bullet = event.at("spawnParameter").at("bulletEntity");
+    const auto &attribute = bullet.at("attribute");
+    EXPECT_TRUE(attribute.contains("speed"));
+    EXPECT_TRUE(attribute.contains("size"));
+    EXPECT_FALSE(bullet.contains("projectile"));
+    EXPECT_FALSE(attribute.contains("canPierce"));
+    EXPECT_FALSE(attribute.contains("pierceCount"));
+    EXPECT_FALSE(attribute.contains("projectilePrefab"));
+    EXPECT_FALSE(attribute.contains("sprite"));
     break;
   }
 }
@@ -305,6 +304,7 @@ TEST(BattleNetworkTest, BattleServer_StartFrameCarriesEnemySpawnEvent) {
             static_cast<int>(Protocol::EntityType::ENEMY));
   EXPECT_EQ(enemy.at("enemyType").get<int>(),
             static_cast<int>(Protocol::BattleEnemyType::BUBBLE_FISH));
+  EXPECT_FALSE(enemy.at("attribute").contains("knockbackResist"));
 }
 
 } // namespace

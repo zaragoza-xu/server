@@ -52,7 +52,6 @@ Battle::WeaponDef test_gun() {
   Battle::WeaponDef weapon;
   weapon.weaponId = "test_gun";
   weapon.weaponName = "test gun";
-  weapon.weaponType = Protocol::WeaponType::RANGED;
   weapon.damage = 5.0;
   weapon.attackSpeed = 0.0;
   weapon.range = 5000.0;
@@ -527,7 +526,7 @@ TEST(RoomTest, BattleRangedWeaponFallsBackWhenProjectileSpeedIsZero) {
   ASSERT_EQ(frame.bulletEntities.size(), 1U);
   EXPECT_DOUBLE_EQ(frame.bulletEntities.front().direction.x, 1.0);
   EXPECT_DOUBLE_EQ(frame.bulletEntities.front().position.x, 1.0);
-  EXPECT_DOUBLE_EQ(frame.bulletEntities.front().projectile.speed, 1.0);
+  EXPECT_DOUBLE_EQ(frame.bulletEntities.front().attribute.speed, 1.0);
 }
 
 TEST(RoomTest, BattleShootRejectsInvalidDirections) {
@@ -584,9 +583,7 @@ TEST(RoomTest, BattleEquipsWeaponItemOnStart) {
 
   const auto player = find_player(frame, harness.uid);
   ASSERT_TRUE(player.has_value());
-  ASSERT_TRUE(player->weapon.has_value());
-  EXPECT_EQ(player->weapon->weaponId, "pistol_1");
-  EXPECT_EQ(player->weapon->weaponType, Protocol::WeaponType::RANGED);
+  EXPECT_EQ(player->weaponId, "pistol_1");
 }
 
 TEST(RoomTest, BattlePistolUsesWeaponDamageAndCooldown) {

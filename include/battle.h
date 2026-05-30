@@ -58,26 +58,18 @@ struct BattlePlayerAttribute {
                                               currentHP, maxHP);
 };
 
-struct BattleWeaponInfo {
-  std::string weaponId;
-  WeaponType weaponType = WeaponType::RANGED;
-
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(BattleWeaponInfo, weaponId,
-                                              weaponType)
-};
-
 struct BattlePlayerEntity : BattleEntity {
   std::string uid;
   BattlePlayerAttribute attribute;
   std::vector<std::string> items; // 已拥有道具的 ID
-  std::optional<BattleWeaponInfo> weapon;
+  std::string weaponId;
 };
 inline void to_json(json &j, const BattlePlayerEntity &e) {
   to_json(j, static_cast<const BattleEntity &>(e));
   j["uid"] = e.uid;
   j["attribute"] = e.attribute;
   j["items"] = e.items;
-  j["weapon"] = e.weapon ? json(e.weapon.value()) : json(nullptr);
+  j["weaponId"] = e.weaponId;
 }
 inline void from_json(const json &j, BattlePlayerEntity &e) {
   from_json(j, static_cast<BattleEntity &>(e));
@@ -87,9 +79,8 @@ inline void from_json(const json &j, BattlePlayerEntity &e) {
     j.at("attribute").get_to(e.attribute);
   if (j.contains("items"))
     j.at("items").get_to(e.items);
-  e.weapon.reset();
-  if (j.contains("weapon") && !j["weapon"].is_null())
-    e.weapon = j["weapon"].get<BattleWeaponInfo>();
+  if (j.contains("weaponId"))
+    j.at("weaponId").get_to(e.weaponId);
 }
 
 struct BattleInfo {
@@ -101,27 +92,24 @@ struct BattleInfo {
 };
 
 // ===== 中立相关 =====
-struct BattleProjectileInfo {
-  std::string projectilePrefab;
+struct BattleBulletAttribute {
   double speed = 0.0;
   double size = 0.0;
-  std::string sprite;
 
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(BattleProjectileInfo,
-                                              projectilePrefab, speed, size,
-                                              sprite)
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(BattleBulletAttribute, speed,
+                                              size)
 };
 
 struct BattleBulletEntity : BattleEntity {
   BattleBulletType type = BattleBulletType::SELF_BULLET;
   std::string weaponId;
-  BattleProjectileInfo projectile;
+  BattleBulletAttribute attribute;
 };
 inline void to_json(json &j, const BattleBulletEntity &e) {
   to_json(j, static_cast<const BattleEntity &>(e));
   j["type"] = e.type;
   j["weaponId"] = e.weaponId;
-  j["projectile"] = e.projectile;
+  j["attribute"] = e.attribute;
 }
 inline void from_json(const json &j, BattleBulletEntity &e) {
   from_json(j, static_cast<BattleEntity &>(e));
@@ -129,8 +117,8 @@ inline void from_json(const json &j, BattleBulletEntity &e) {
     j.at("type").get_to(e.type);
   if (j.contains("weaponId"))
     j.at("weaponId").get_to(e.weaponId);
-  if (j.contains("projectile"))
-    j.at("projectile").get_to(e.projectile);
+  if (j.contains("attribute"))
+    j.at("attribute").get_to(e.attribute);
 }
 
 // ===== 敌人相关 =====
@@ -138,9 +126,8 @@ inline void from_json(const json &j, BattleBulletEntity &e) {
 struct BattleEnemyAttribute {
   int currentHP = 0;
   int maxHP = 0;
-  double knockbackResist = 0.0;
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(BattleEnemyAttribute, currentHP,
-                                              maxHP, knockbackResist)
+                                              maxHP)
 };
 
 struct BattleEnemyEntity : BattleEntity {
@@ -371,7 +358,6 @@ struct EnemySpawnSpec {
   int maxHP = 10;
   double attackRange = 1.5;
   double maxSpeed = 1.0;
-  double knockbackResist = 0.0;
   int attackDamage = 4;
   int attackCooldownTicks = 20;
   double cost = 1.0;
@@ -390,14 +376,12 @@ struct ProjectileDef {
   int bounceCount = 0;
   bool explosion = false;
   double explosionRadius = 0.0;
-  std::string sprite;
 };
 
 struct WeaponDef {
   std::string weaponId;
   std::string weaponName;
   std::string icon;
-  Protocol::WeaponType weaponType = Protocol::WeaponType::RANGED;
   double damage = 0.0;
   double attackSpeed = 0.0;
   double range = 0.0;
@@ -407,7 +391,6 @@ struct WeaponDef {
   double critChance = 0.0;
   double critMultiplier = 1.0;
   double lifeSteal = 0.0;
-  std::string projectilePrefab;
   int projectileCount = 0;
   ProjectileDef projectile;
   std::vector<std::string> tags;
@@ -417,7 +400,6 @@ struct EnemyState {
   Protocol::BattleEnemyEntity entity;
   double attackRange = 1.5;
   double maxSpeed = 1.0;
-  double knockbackResist = 0.0;
   int attackDamage = 4;
   int attackCooldownTicks = 20;
   int nextAttackTick = 0;
