@@ -384,13 +384,16 @@ int Server::resolve_room_member_locked(const std::string &uid,
   return Protocol::SERVICE_SUCCESS;
 }
 
-void Server::bind_user_channel(const std::string &uid,
-                               const std::shared_ptr<Channel> &channel) {
-  if (uid.empty() || !channel) {
-    return;
+void Server::bind_channel(const json &request,
+                          const std::shared_ptr<Channel> &channel) {
+  if (channel && request.contains("uid")) {
+    const std::string uid = request.at("uid").get<std::string>();
+    if (uid.empty()) {
+      return;
+    }
+    std::lock_guard<std::mutex> lock(userChannelsMutex);
+    userChannels[uid] = channel;
   }
-  std::lock_guard<std::mutex> lock(userChannelsMutex);
-  userChannels[uid] = channel;
 }
 
 void Server::broadcast_to_members(const std::vector<std::string> &memberUids,
@@ -798,100 +801,27 @@ int Server::list_rooms(const Protocol::ListRoomsReq &,
 
 json LoginServer::dispatch_request(const json &request,
                                    const std::shared_ptr<Channel> &) {
-  const auto type = static_cast<Protocol::LoginRequestType>(request.value(
-      "type", static_cast<int>(Protocol::LoginRequestType::ERROR)));
-  logging::log("[dispatch][login] type={}({}) request={}",
-               logging::request_type_name(type), static_cast<int>(type),
-               request.dump());
-
-  const auto it = std::find_if(
-      COMMAND_TABLE.begin(), COMMAND_TABLE.end(),
-      [type](const CommandDescriptor &entry) { return entry.type == type; });
-  if (it == COMMAND_TABLE.end()) {
-    logging::log("[dispatch][login] unknown type={}({})",
-                 logging::request_type_name(type), static_cast<int>(type));
-    return Protocol::ShortEnvelope::make_env(Protocol::SERVICE_FAIL |
-                                             Protocol::BAD_REQUEST);
-  }
-
-  const auto env = it->dispatch(*this, request);
-  return env;
+  return dispatch_table("login", Protocol::LoginRequestType::ERROR,
+                        COMMAND_TABLE, request);
 }
 
 json HomeServer::dispatch_request(const json &request,
                                   const std::shared_ptr<Channel> &channel) {
-  if (channel && request.contains("uid") && request.at("uid").is_string()) {
-    bind_user_channel(request.at("uid").get<std::string>(), channel);
-  }
-
-  const auto type = static_cast<Protocol::HomeRequestType>(request.value(
-      "type", static_cast<int>(Protocol::HomeRequestType::ERROR)));
-  logging::log("[dispatch][home] type={}({}) request={}",
-               logging::request_type_name(type), static_cast<int>(type),
-               request.dump());
-
-  const auto it = std::find_if(
-      COMMAND_TABLE.begin(), COMMAND_TABLE.end(),
-      [type](const CommandDescriptor &entry) { return entry.type == type; });
-  if (it == COMMAND_TABLE.end()) {
-    logging::log("[dispatch][home] unknown type={}({})",
-                 logging::request_type_name(type), static_cast<int>(type));
-    return Protocol::ShortEnvelope::make_env(Protocol::SERVICE_FAIL |
-                                             Protocol::BAD_REQUEST);
-  }
-
-  const auto payload = it->dispatch(*this, request);
-  return payload;
+  bind_channel(request, channel);
+  return dispatch_table("home", Protocol::HomeRequestType::ERROR, COMMAND_TABLE,
+                        request);
 }
 
 json ShopServer::dispatch_request(const json &request,
                                   const std::shared_ptr<Channel> &channel) {
-  if (channel && request.contains("uid") && request.at("uid").is_string()) {
-    bind_user_channel(request.at("uid").get<std::string>(), channel);
-  }
-
-  const auto type = static_cast<Protocol::ShopRequestType>(request.value(
-      "type", static_cast<int>(Protocol::ShopRequestType::ERROR)));
-  logging::log("[dispatch][shop] type={}({}) request={}",
-               logging::request_type_name(type), static_cast<int>(type),
-               request.dump());
-
-  const auto it = std::find_if(
-      COMMAND_TABLE.begin(), COMMAND_TABLE.end(),
-      [type](const CommandDescriptor &entry) { return entry.type == type; });
-  if (it == COMMAND_TABLE.end()) {
-    logging::log("[dispatch][shop] unknown type={}({})",
-                 logging::request_type_name(type), static_cast<int>(type));
-    return Protocol::ShortEnvelope::make_env(Protocol::SERVICE_FAIL |
-                                             Protocol::BAD_REQUEST);
-  }
-
-  const auto payload = it->dispatch(*this, request);
-  return payload;
+  bind_channel(request, channel);
+  return dispatch_table("shop", Protocol::ShopRequestType::ERROR, COMMAND_TABLE,
+                        request);
 }
 
 json MapServer::dispatch_request(const json &request,
                                  const std::shared_ptr<Channel> &channel) {
-  if (channel && request.contains("uid") && request.at("uid").is_string()) {
-    bind_user_channel(request.at("uid").get<std::string>(), channel);
-  }
-
-  const auto type = static_cast<Protocol::MapRequestType>(request.value(
-      "type", static_cast<int>(Protocol::MapRequestType::MAP_MOVE) + 100));
-  logging::log("[dispatch][map] type={}({}) request={}",
-               logging::request_type_name(type), static_cast<int>(type),
-               request.dump());
-
-  const auto it = std::find_if(
-      COMMAND_TABLE.begin(), COMMAND_TABLE.end(),
-      [type](const CommandDescriptor &entry) { return entry.type == type; });
-  if (it == COMMAND_TABLE.end()) {
-    logging::log("[dispatch][map] unknown type={}({})",
-                 logging::request_type_name(type), static_cast<int>(type));
-    return Protocol::ShortEnvelope::make_env(Protocol::SERVICE_FAIL |
-                                             Protocol::BAD_REQUEST);
-  }
-
-  const auto payload = it->dispatch(*this, request);
-  return payload;
+  bind_channel(request, channel);
+  constexpr auto fallback = static_cast<Protocol::MapRequestType>(100);
+  return dispatch_table("map", fallback, COMMAND_TABLE, request);
 }

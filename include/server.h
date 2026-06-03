@@ -1,9 +1,11 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
@@ -17,6 +19,7 @@
 
 #include "battle.h"
 #include "battle_config.h"
+#include "logging.h"
 #include "protocol.h"
 
 class Channel;
@@ -137,13 +140,34 @@ public:
 protected:
   std::shared_ptr<ServerState> get_shared_state() const { return state; }
 
+  template <typename Type, typename Table>
+  json dispatch_table(std::string_view service, Type fallback,
+                      const Table &table, const json &request) {
+    const auto type =
+        static_cast<Type>(request.value("type", static_cast<int>(fallback)));
+    logging::log("[dispatch][{}] type={}({}) request={}", service,
+                 logging::request_type_name(type), static_cast<int>(type),
+                 request.dump());
+
+    const auto it =
+        std::find_if(table.begin(), table.end(),
+                     [type](const auto &entry) { return entry.type == type; });
+    if (it == table.end()) {
+      logging::log("[dispatch][{}] unknown type={}({})", service,
+                   logging::request_type_name(type), static_cast<int>(type));
+      return json(Protocol::ShortEnvelope::make_env(Protocol::SERVICE_FAIL |
+                                                    Protocol::BAD_REQUEST));
+    }
+    return it->dispatch(*this, request);
+  }
+
   // uid -> active channel for server push (per-server-instance, weak to avoid
   // ownership cycle)
   std::unordered_map<std::string, std::weak_ptr<Channel>> userChannels;
   std::mutex userChannelsMutex;
 
-  void bind_user_channel(const std::string &uid,
-                         const std::shared_ptr<Channel> &channel);
+  void bind_channel(const json &request,
+                    const std::shared_ptr<Channel> &channel);
   void broadcast_to_members(const std::vector<std::string> &memberUids,
                             const Protocol::LongEnvelope &message,
                             const std::string &excludeUid = "");
@@ -165,18 +189,19 @@ private:
     Protocol::LoginRequestType type;
     DispatchFn dispatch;
   };
-  const std::array<LoginServer::CommandDescriptor, 3> COMMAND_TABLE{{
-      {Protocol::LoginRequestType::LOGIN,
-       &Server::dispatch_entry_short<Protocol::LoginReq, Protocol::LoginRsp,
-                                     &Server::login_user>},
-      {Protocol::LoginRequestType::REGISTER,
-       &Server::dispatch_entry_short<Protocol::RegisterReq,
-                                     Protocol::RegisterRsp,
-                                     &Server::register_user>},
-      {Protocol::LoginRequestType::LOGOUT,
-       &Server::dispatch_entry_short<Protocol::LogoutReq, Protocol::EmptyRsp,
-                                     &Server::logout_user>},
-  }};
+  inline static constexpr std::array<LoginServer::CommandDescriptor, 3>
+      COMMAND_TABLE{{
+          {Protocol::LoginRequestType::LOGIN,
+           &Server::dispatch_entry_short<Protocol::LoginReq, Protocol::LoginRsp,
+                                         &Server::login_user>},
+          {Protocol::LoginRequestType::REGISTER,
+           &Server::dispatch_entry_short<Protocol::RegisterReq,
+                                         Protocol::RegisterRsp,
+                                         &Server::register_user>},
+          {Protocol::LoginRequestType::LOGOUT,
+           &Server::dispatch_entry_short<
+               Protocol::LogoutReq, Protocol::EmptyRsp, &Server::logout_user>},
+      }};
 };
 
 // home server spec
@@ -194,29 +219,33 @@ private:
     Protocol::HomeRequestType type;
     DispatchFn dispatch;
   };
-  const std::array<HomeServer::CommandDescriptor, 6> COMMAND_TABLE{{
-      {Protocol::HomeRequestType::EDIT_PROFILE,
-       &Server::dispatch_entry_short<Protocol::EditProfileReq,
-                                     Protocol::EmptyRsp,
-                                     &Server::edit_profile>},
-      {Protocol::HomeRequestType::CREATE_ROOM,
-       &Server::dispatch_entry_short<Protocol::CreateRoomReq,
-                                     Protocol::CreateRoomRsp,
-                                     &Server::create_room>},
-      {Protocol::HomeRequestType::JOIN_ROOM,
-       &Server::dispatch_entry_short<
-           Protocol::JoinRoomReq, Protocol::JoinRoomRsp, &Server::join_room>},
-      {Protocol::HomeRequestType::LIST_ROOMS,
-       &Server::dispatch_entry_short<Protocol::ListRoomsReq,
-                                     Protocol::ListRoomsRsp,
-                                     &Server::list_rooms>},
-      {Protocol::HomeRequestType::LEAVE_ROOM,
-       &Server::dispatch_entry_long<Protocol::LeaveRoomReq, Protocol::EmptyRsp,
-                                    &Server::leave_room>},
-      {Protocol::HomeRequestType::SET_READY,
-       &Server::dispatch_entry_long<
-           Protocol::SetReadyReq, Protocol::NoResponseRsp, &Server::set_ready>},
-  }};
+  inline static constexpr std::array<HomeServer::CommandDescriptor, 6>
+      COMMAND_TABLE{{
+          {Protocol::HomeRequestType::EDIT_PROFILE,
+           &Server::dispatch_entry_short<Protocol::EditProfileReq,
+                                         Protocol::EmptyRsp,
+                                         &Server::edit_profile>},
+          {Protocol::HomeRequestType::CREATE_ROOM,
+           &Server::dispatch_entry_short<Protocol::CreateRoomReq,
+                                         Protocol::CreateRoomRsp,
+                                         &Server::create_room>},
+          {Protocol::HomeRequestType::JOIN_ROOM,
+           &Server::dispatch_entry_short<Protocol::JoinRoomReq,
+                                         Protocol::JoinRoomRsp,
+                                         &Server::join_room>},
+          {Protocol::HomeRequestType::LIST_ROOMS,
+           &Server::dispatch_entry_short<Protocol::ListRoomsReq,
+                                         Protocol::ListRoomsRsp,
+                                         &Server::list_rooms>},
+          {Protocol::HomeRequestType::LEAVE_ROOM,
+           &Server::dispatch_entry_long<Protocol::LeaveRoomReq,
+                                        Protocol::EmptyRsp,
+                                        &Server::leave_room>},
+          {Protocol::HomeRequestType::SET_READY,
+           &Server::dispatch_entry_long<Protocol::SetReadyReq,
+                                        Protocol::NoResponseRsp,
+                                        &Server::set_ready>},
+      }};
 };
 
 // shop server spec
@@ -234,19 +263,21 @@ private:
     Protocol::ShopRequestType type;
     DispatchFn dispatch;
   };
-  const std::array<ShopServer::CommandDescriptor, 3> COMMAND_TABLE{{
-      {Protocol::ShopRequestType::SHOP_INIT,
-       &Server::dispatch_entry_long<Protocol::ShopInitReq,
-                                    Protocol::ShopInitRsp, &Server::shop_init>},
-      {Protocol::ShopRequestType::SHOP_MOVE_CURSOR,
-       &Server::dispatch_entry_long<Protocol::ShopMoveCursorReq,
-                                    Protocol::NoResponseRsp,
-                                    &Server::shop_move_cursor>},
-      {Protocol::ShopRequestType::SHOP_BUY,
-       &Server::dispatch_entry_long<Protocol::ShopBuyItemReq,
-                                    Protocol::NoResponseRsp,
-                                    &Server::shop_buy_item>},
-  }};
+  inline static constexpr std::array<ShopServer::CommandDescriptor, 3>
+      COMMAND_TABLE{{
+          {Protocol::ShopRequestType::SHOP_INIT,
+           &Server::dispatch_entry_long<Protocol::ShopInitReq,
+                                        Protocol::ShopInitRsp,
+                                        &Server::shop_init>},
+          {Protocol::ShopRequestType::SHOP_MOVE_CURSOR,
+           &Server::dispatch_entry_long<Protocol::ShopMoveCursorReq,
+                                        Protocol::NoResponseRsp,
+                                        &Server::shop_move_cursor>},
+          {Protocol::ShopRequestType::SHOP_BUY,
+           &Server::dispatch_entry_long<Protocol::ShopBuyItemReq,
+                                        Protocol::NoResponseRsp,
+                                        &Server::shop_buy_item>},
+      }};
 };
 
 // map server spec
@@ -264,14 +295,16 @@ private:
     Protocol::MapRequestType type;
     DispatchFn dispatch;
   };
-  const std::array<MapServer::CommandDescriptor, 2> COMMAND_TABLE{{
-      {Protocol::MapRequestType::MAP_INIT,
-       &Server::dispatch_entry_long<Protocol::MapInitReq, Protocol::MapInitRsp,
-                                    &Server::map_init>},
-      {Protocol::MapRequestType::MAP_MOVE,
-       &Server::dispatch_entry_long<
-           Protocol::MapMoveReq, Protocol::NoResponseRsp, &Server::map_move>},
-  }};
+  inline static constexpr std::array<MapServer::CommandDescriptor, 2>
+      COMMAND_TABLE{{
+          {Protocol::MapRequestType::MAP_INIT,
+           &Server::dispatch_entry_long<
+               Protocol::MapInitReq, Protocol::MapInitRsp, &Server::map_init>},
+          {Protocol::MapRequestType::MAP_MOVE,
+           &Server::dispatch_entry_long<Protocol::MapMoveReq,
+                                        Protocol::NoResponseRsp,
+                                        &Server::map_move>},
+      }};
 };
 
 class BattleServer : public Server {
@@ -294,18 +327,19 @@ private:
     Protocol::BattleRequestType type;
     DispatchFn dispatch;
   };
-  const std::array<BattleServer::CommandDescriptor, 3> COMMAND_TABLE{{
-      {Protocol::BattleRequestType::PLAYER_READY,
-       &Server::dispatch_entry_long<Protocol::BattlePlayerReadyReq,
-                                    Protocol::NoResponseRsp,
-                                    &Server::battle_player_ready>},
-      {Protocol::BattleRequestType::POSITION_SYNC,
-       &Server::dispatch_entry_long<Protocol::BattleSyncReq,
-                                    Protocol::NoResponseRsp,
-                                    &Server::battle_sync>},
-      {Protocol::BattleRequestType::PLAYER_SHOOT,
-       &Server::dispatch_entry_long<Protocol::BattlePlayerShootReq,
-                                    Protocol::NoResponseRsp,
-                                    &Server::battle_player_shoot>},
-  }};
+  inline static constexpr std::array<BattleServer::CommandDescriptor, 3>
+      COMMAND_TABLE{{
+          {Protocol::BattleRequestType::PLAYER_READY,
+           &Server::dispatch_entry_long<Protocol::BattlePlayerReadyReq,
+                                        Protocol::NoResponseRsp,
+                                        &Server::battle_player_ready>},
+          {Protocol::BattleRequestType::POSITION_SYNC,
+           &Server::dispatch_entry_long<Protocol::BattleSyncReq,
+                                        Protocol::NoResponseRsp,
+                                        &Server::battle_sync>},
+          {Protocol::BattleRequestType::PLAYER_SHOOT,
+           &Server::dispatch_entry_long<Protocol::BattlePlayerShootReq,
+                                        Protocol::NoResponseRsp,
+                                        &Server::battle_player_shoot>},
+      }};
 };
