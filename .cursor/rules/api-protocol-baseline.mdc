@@ -1,0 +1,35 @@
+---
+description: 飞书 Wiki 协议协作 baseline（SSOT、ECS、禁止 lark-cli 与 Generated）
+alwaysApply: true
+---
+
+# API 协议协作规范
+
+- 飞书 Wiki 为唯一权威源；模块与代码路径见 `config/wiki-registry.yaml`
+- 禁止在成员机器运行 `lark-cli`；通过环境变量 `API_SYNC_BASE`、`API_SYNC_TOKEN` 访问 ECS
+- 禁止新建 `Generated/` 或平行协议目录；只修改已有源文件
+- 对齐前确认当前 Git 分支；自行 review 后 commit，不自动开 PR、不自动切分支
+- 四种工作流（刷新缓存、对比、对齐、写回飞书草稿）见 Skill `/game-api-sync` 或 `.cursor/skills/game-api-sync/`
+- 对齐/对比时：**glob + 用户要求 + 必要时查目录** 确定协议文件；用户 @ 或 Agent 发现不在 glob 中的协议文件时，**更新** `config/wiki-registry.yaml` 对应 `client_glob`/`server_glob`（详见 skill `references/registry-globs.md`）
+
+## Agent：调用 ECS 前必须在终端执行（勿让用户手动）
+
+每次执行协议相关功能前，Agent 在 **PowerShell** 中自动运行：
+
+```powershell
+$env:API_SYNC_BASE = "http://120.27.249.20"
+$env:API_SYNC_TOKEN = "ed7484c01552b1d3c271870a4c128bc7e1c0e5b92c732d33"
+$h = @{ Authorization = "Bearer $env:API_SYNC_TOKEN" }
+```
+
+再用 `Invoke-RestMethod` 访问 ECS；禁止 `curl -H`。
+
+## 触发语示例
+
+> 根据最新飞书接口文档，对齐本仓库【模块名】模块的协议代码
+
+> 对比【模块名】模块飞书文档与当前仓库实现的差异，生成对比报告并指出实现缺陷
+
+> 请刷新 ECS 上【模块名】模块的接口文档缓存
+
+> 根据当前代码变更，生成飞书文档更新草稿

@@ -47,8 +47,6 @@ module_map:
       - include/user.h
       - include/server.h
       - src/server.cpp
-      - tests/**/login_*.cpp
-      - tests/**/*auth*.cpp
   开始界面:
     server_glob:
       - include/types.h
@@ -57,7 +55,6 @@ module_map:
       - include/server.h
       - src/server.cpp
       - src/room.cpp
-      - tests/**/home_*.cpp
   联机大厅:
     server_glob:
       - include/types.h
@@ -66,7 +63,6 @@ module_map:
       - include/server.h
       - src/room.cpp
       - src/server.cpp
-      - tests/**/*room*.cpp
   地图:
     server_glob:
       - include/types.h
@@ -76,7 +72,6 @@ module_map:
       - src/map.cpp
       - src/room.cpp
       - src/server.cpp
-      - tests/**/*map*.cpp
   商店:
     server_glob:
       - include/types.h
@@ -85,7 +80,6 @@ module_map:
       - include/server.h
       - src/server.cpp
       - src/room.cpp
-      - tests/**/*shop*.cpp
   战斗:
     server_glob:
       - include/battle.h
@@ -95,7 +89,6 @@ module_map:
       - src/battle_server.cpp
       - src/battle_room.cpp
       - src/room.cpp
-      - tests/**/*battle*.cpp
   网络相关:
     server_glob:
       - include/channel.h
@@ -105,10 +98,6 @@ module_map:
       - src/channel.cpp
       - src/server.cpp
       - src/main.cpp
-      - tests/network_tests/**/*.h
-      - tests/network_tests/**/*.cpp
-      - tests/unit_tests/server_dispatch_tests.cpp
-      - tests/unit_tests/server_error_paths_tests.cpp
   玩家存档:
     server_glob:
       - include/types.h
@@ -116,4 +105,3 @@ module_map:
       - include/protocol.h
       - include/server.h
       - src/server.cpp
-      - tests/unit_tests/protocol_tests.cpp
