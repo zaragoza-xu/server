@@ -140,6 +140,34 @@ Protocol::RoomInfo Room::get_info() const {
   return info;
 }
 
+Protocol::GetStateStatusRsp Room::get_state_status_snapshot() const {
+  Protocol::GetStateStatusRsp snapshot;
+  std::lock_guard<std::mutex> lock(roomMutex);
+  snapshot.roomId = roomId;
+  snapshot.roomMemberCount = static_cast<int>(uids.size());
+  snapshot.mapNodeId = mapNodeId;
+  snapshot.battleTick = battleTick;
+  snapshot.allLobbyReady = all_lobby_ready_locked();
+  switch (phase) {
+  case Phase::LOBBY:
+    snapshot.roomPhase = 0;
+    break;
+  case Phase::SHOP:
+    snapshot.roomPhase = 1;
+    break;
+  case Phase::MAP:
+    snapshot.roomPhase = 2;
+    break;
+  case Phase::BATTLE:
+    snapshot.roomPhase = 3;
+    break;
+  case Phase::END:
+    snapshot.roomPhase = 4;
+    break;
+  }
+  return snapshot;
+}
+
 bool Room::add_member(std::shared_ptr<User> user) {
   std::lock_guard<std::mutex> lock(roomMutex);
   if (phase != Phase::LOBBY) {

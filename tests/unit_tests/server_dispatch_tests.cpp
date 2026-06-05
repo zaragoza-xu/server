@@ -159,4 +159,26 @@ TEST(ServerDispatchTest, ShopServerDispatchRouting) {
             (Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST));
 }
 
+TEST(ServerDispatchTest, HomeServerGetStateStatusRouting) {
+  asio::io_context ioContext;
+  auto state = std::make_shared<ServerState>();
+  auto loginServer = std::make_shared<LoginServer>(ioContext, 0, state);
+  auto homeServer = std::make_shared<HomeServer>(ioContext, 0, state);
+
+  auto registerEnv = loginServer->dispatch_request(json(Protocol::LoginReq{
+      .type = Protocol::LoginRequestType::REGISTER, .uid = ""}));
+  const auto uid = registerEnv.get<Protocol::ShortEnvelope>()
+                       .data.get<Protocol::RegisterRsp>()
+                       .uid;
+  loginServer->dispatch_request(json(Protocol::LoginReq{
+      .type = Protocol::LoginRequestType::LOGIN, .uid = uid}));
+
+  auto statusEnv = homeServer->dispatch_request(json(Protocol::GetStateStatusReq{
+      .type = Protocol::HomeRequestType::GET_STATE_STATUS, .uid = uid}));
+  const auto statusShort = statusEnv.get<Protocol::ShortEnvelope>();
+  EXPECT_EQ(statusShort.code, Protocol::SERVICE_SUCCESS);
+  EXPECT_TRUE(statusShort.data.get<Protocol::GetStateStatusRsp>().online);
+  EXPECT_EQ(statusShort.data.get<Protocol::GetStateStatusRsp>().roomId, -1);
+}
+
 } // namespace

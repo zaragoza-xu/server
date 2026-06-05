@@ -189,6 +189,8 @@ public:
 
   Protocol::RoomInfo get_info() const;
 
+  Protocol::GetStateStatusRsp get_state_status_snapshot() const;
+
   // Add member if not present and capacity allows.
   bool add_member(std::shared_ptr<User> user);
 

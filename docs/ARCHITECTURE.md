@@ -406,5 +406,6 @@ ctest --preset debug-tests
   - `docs/TESTING_CHECKLIST.md`
   - 相关测试
 - 任何阶段迁移或入口权限变更，都必须同步更新阶段状态机文档和阶段行为测试
+- 测试仓库 / Automation 联调说明见 [`docs/TESTING.md`](TESTING.md)
 - 任何新增服务实例或启动参数，都必须同步更新 `config/server.json` 与运行说明
 - 任何新的 tick 驱动行为，都应优先在 `Room`/`BattleServer` 两侧写单元测试锁定语义

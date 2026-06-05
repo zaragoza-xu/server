@@ -130,6 +130,13 @@ struct ListRoomsReq {
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(ListRoomsReq, type)
 };
 
+struct GetStateStatusReq {
+  Protocol::HomeRequestType type;
+  std::string uid;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(GetStateStatusReq, type, uid)
+};
+
 struct SendMessageReq {
   Protocol::HomeRequestType type;
   std::string content;
@@ -258,5 +265,20 @@ struct ListRoomsRsp {
   std::vector<RoomInfo> roomInfos;
 
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(ListRoomsRsp, roomInfos)
+};
+
+struct GetStateStatusRsp {
+  bool online = false;
+  int roomId = -1;
+  int roomPhase = 0;
+  int roomMemberCount = 0;
+  bool allLobbyReady = false;
+  int mapNodeId = -1;
+  int battleTick = 0;
+
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(GetStateStatusRsp, online, roomId,
+                                              roomPhase, roomMemberCount,
+                                              allLobbyReady, mapNodeId,
+                                              battleTick)
 };
 } // namespace Protocol

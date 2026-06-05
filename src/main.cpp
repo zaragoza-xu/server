@@ -10,6 +10,7 @@
 
 #include "logging.h"
 #include "server.h"
+#include "startup_options.h"
 
 using json = nlohmann::json;
 
@@ -22,31 +23,6 @@ struct RuntimeConfig {
   int mapPort = 0;
   int battlePort = 0;
 };
-
-std::string resolve_config_path(int argc, char **argv) {
-  // Support: --config <path> or --config=<path>
-  for (int i = 1; i < argc; ++i) {
-    std::string arg = argv[i];
-    if (arg == "--config" && i + 1 < argc) {
-      return argv[i + 1];
-    }
-    if (arg.starts_with("--config=")) {
-      return arg.substr(9);
-    }
-  }
-
-  // Search default locations
-  static const char *candidates[] = {
-      "config/server.json",
-      "../config/server.json",
-  };
-  for (const auto *path : candidates) {
-    if (std::ifstream ifs(path); ifs.good()) {
-      return path;
-    }
-  }
-  return "config/server.json";
-}
 
 bool is_valid_port(int port) { return port >= 1 && port <= 65535; }
 
@@ -95,9 +71,13 @@ bool validate_config(const RuntimeConfig &cfg) {
 
 int main(int argc, char **argv) {
   try {
-    const std::string configPath = resolve_config_path(argc, argv);
+    StartupOptions startup;
+    if (!parse_startup_options(argc, argv, startup)) {
+      return 1;
+    }
+
     RuntimeConfig cfg;
-    if (!load_config(configPath, cfg)) {
+    if (!load_config(startup.configPath, cfg)) {
       return 1;
     }
     if (!validate_config(cfg)) {
@@ -106,6 +86,8 @@ int main(int argc, char **argv) {
 
     asio::io_context io_context;
     auto sharedState = std::make_shared<ServerState>();
+    apply_startup_battle_config(sharedState, startup);
+
     auto authServer =
         std::make_shared<LoginServer>(io_context, cfg.authPort, sharedState);
     auto lobbyServer =
@@ -123,7 +105,7 @@ int main(int argc, char **argv) {
     mapServer->start();
     battleServer->start();
 
-    logging::log("Config loaded from: {}", configPath);
+    logging::log("Config loaded from: {}", startup.configPath);
     logging::log("Auth service listening on port {}", cfg.authPort);
     logging::log("Lobby service listening on port {}", cfg.lobbyPort);
     logging::log("Shop service listening on port {}", cfg.shopPort);

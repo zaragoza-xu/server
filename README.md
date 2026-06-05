@@ -57,7 +57,7 @@
 - `EDIT_PROFILE = 6`
 - `SET_READY = 7`
 - `BROADCAST = 8`（大厅内服务端广播使用）
-- `GET_STATE_STATUS = 9`（预留）
+- `GET_STATE_STATUS = 9`（查询在线/房间阶段快照，ShortEnvelope）
 - `ERROR = 100`
 
 商店域：
@@ -321,11 +321,14 @@ ctest --test-dir build -R "^home_network_tests::" --output-on-failure
 ./build/server
 ```
 
-也可以显式指定配置文件：
+也可以显式指定配置文件与战斗参数：
 
 ```bash
-./build/server --config config/server.json
+./build/server --config config/server.json --duration-seconds 5
+./build/server --config config/server.json --battle-config config/battle_config.json
 ```
+
+联调推荐使用 [`scripts/run_test_server.sh`](scripts/run_test_server.sh)（默认 `--duration-seconds 5`）。详见 [`docs/TESTING.md`](docs/TESTING.md)。
 
 启动后会同时监听五个端口：
 

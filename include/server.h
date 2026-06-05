@@ -128,6 +128,8 @@ public:
   int battle_player_shoot(const Protocol::BattlePlayerShootReq &,
                           Protocol::NoResponseRsp &);
   int list_rooms(const Protocol::ListRoomsReq &, Protocol::ListRoomsRsp &);
+  int get_state_status(const Protocol::GetStateStatusReq &,
+                       Protocol::GetStateStatusRsp &);
   int logout_user(const Protocol::LogoutReq &, Protocol::EmptyRsp &);
 
   // Internal/user lifecycle helpers.
@@ -194,7 +196,7 @@ private:
     Protocol::HomeRequestType type;
     DispatchFn dispatch;
   };
-  const std::array<HomeServer::CommandDescriptor, 6> COMMAND_TABLE{{
+  const std::array<HomeServer::CommandDescriptor, 7> COMMAND_TABLE{{
       {Protocol::HomeRequestType::EDIT_PROFILE,
        &Server::dispatch_entry_short<Protocol::EditProfileReq,
                                      Protocol::EmptyRsp,
@@ -216,6 +218,10 @@ private:
       {Protocol::HomeRequestType::SET_READY,
        &Server::dispatch_entry_long<
            Protocol::SetReadyReq, Protocol::NoResponseRsp, &Server::set_ready>},
+      {Protocol::HomeRequestType::GET_STATE_STATUS,
+       &Server::dispatch_entry_short<Protocol::GetStateStatusReq,
+                                     Protocol::GetStateStatusRsp,
+                                     &Server::get_state_status>},
   }};
 };
 
