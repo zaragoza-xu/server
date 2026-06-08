@@ -23,7 +23,7 @@ void Room::reset_battle_state_locked() {
   battleStarted = false;
   battleTick = 0;
   nextBattleEntityId = 1;
-  nextBattleSpawnTick = 1;
+  nextBattleSpawnTick = 0;
   battlePlayersByUid.clear();
   battleWeaponsByUid.clear();
   battleEnemyStates.clear();
@@ -46,14 +46,6 @@ Protocol::BattleFrameRsp Room::build_battle_frame_locked() const {
     if (it != battlePlayersByUid.end()) {
       frame.playerEntities.push_back(it->second);
     }
-  }
-  frame.enemyEntities.reserve(battleEnemyStates.size());
-  for (const auto &[entityId, enemyState] : battleEnemyStates) {
-    frame.enemyEntities.push_back(enemyState.entity);
-  }
-  frame.bulletEntities.reserve(battleBullets.size());
-  for (const auto &bulletState : battleBullets) {
-    frame.bulletEntities.push_back(bulletState.entity);
   }
   frame.events = pendingBattleEvents;
   return frame;
@@ -348,8 +340,6 @@ bool Room::tick_battle(Protocol::BattleFrameRsp &frame, bool *ended) {
     return false;
   }
 
-  ++battleTick;
-
   bool battleWon = battle_time_locked() >= battleConfig.durationSeconds;
   bool battleEnded = battleWon;
 
@@ -396,6 +386,9 @@ bool Room::tick_battle(Protocol::BattleFrameRsp &frame, bool *ended) {
       *ended = true;
     }
   }
+
+  ++battleTick;
+
   return true;
 }
 

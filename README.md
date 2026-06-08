@@ -154,6 +154,8 @@
 - `BattleServer` 每 16ms 扫描房间并广播 `BATTLE_FRAME`
 - `BATTLE_SYNC` 接收客户端实际玩家位置和本地计算的怪物位置
 - 玩家位置以客户端最新上报为准；怪物位置在 `tick_battle()` 中按实体取各客户端最新上报的均值
+- `BATTLE_FRAME.data` 当前包含 `serverTick`、`playerEntities`、`events`；不再每帧同步 `enemyEntities` 和 `bulletEntities`
+- 敌人/子弹的出生、命中、销毁通过 `events` 广播；敌人生成事件的 `attribute` 包含 `attackCooldownTicks`
 - `PLAYER_SHOOT` 由服务端生成玩家子弹；tick 中推进子弹，命中墙/敌人时广播 hit、damage、destroy 事件
 - 战斗结束的帧会在 `pushMessages` 中附带 `BATTLE_END`
 

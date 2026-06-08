@@ -123,4 +123,43 @@ TEST(ProtocolTest, RequestResponseJsonRoundTrip) {
   EXPECT_EQ(parsedEdit.basicInfo.color, 7);
 }
 
+TEST(ProtocolTest, BattleFrameJsonOmitsDurableEnemyAndBulletLists) {
+  Protocol::BattleFrameRsp frame;
+  frame.serverTick = 7;
+  Protocol::BattlePlayerEntity player;
+  player.entityId = 1;
+  player.entityType = Protocol::EntityType::PLAYER;
+  player.uid = "1001";
+  frame.playerEntities.push_back(player);
+
+  json frameJson = frame;
+  EXPECT_TRUE(frameJson.contains("serverTick"));
+  EXPECT_TRUE(frameJson.contains("playerEntities"));
+  EXPECT_TRUE(frameJson.contains("events"));
+  EXPECT_FALSE(frameJson.contains("enemyEntities"));
+  EXPECT_FALSE(frameJson.contains("bulletEntities"));
+}
+
+TEST(ProtocolTest, BattleSpawnParameterUsesNullForUnusedDtos) {
+  Protocol::BattleEnemyEntity enemy;
+  enemy.entityId = 2;
+  enemy.entityType = Protocol::EntityType::ENEMY;
+  enemy.attribute.currentHP = 10;
+  enemy.attribute.maxHP = 10;
+  enemy.attribute.attackCooldownTicks = 20;
+
+  Protocol::BattleEventDTO event;
+  event.eventType = Protocol::BattleEventType::ENEMY_SPAWN;
+  event.eventTick = 3;
+  event.spawnParameter = Protocol::BattleEventDTO::SpawnParameter(enemy);
+
+  json eventJson = event;
+  const auto &spawn = eventJson.at("spawnParameter");
+  EXPECT_TRUE(spawn.at("playerEntity").is_null());
+  EXPECT_FALSE(spawn.at("enemyEntity").is_null());
+  EXPECT_TRUE(spawn.at("bulletEntity").is_null());
+  EXPECT_EQ(spawn.at("enemyEntity").at("attribute").at("attackCooldownTicks"),
+            20);
+}
+
 } // namespace
