@@ -35,7 +35,7 @@ asio::awaitable<void> BattleServer::tick_loop() {
     const int frameRate =
         (sharedState && sharedState->battleConfig.frameRate > 0)
             ? sharedState->battleConfig.frameRate
-            : default_battle_config().frameRate;
+            : Battle::default_battle_config().frameRate;
     tickTimer.expires_after(
         std::chrono::milliseconds(std::max(1, 1000 / frameRate)));
     std::error_code ec;
@@ -160,25 +160,7 @@ int Server::battle_player_shoot(const Protocol::BattlePlayerShootReq &req,
 
 json BattleServer::dispatch_request(const json &request,
                                     const std::shared_ptr<Channel> &channel) {
-  if (channel && request.contains("uid") && request.at("uid").is_string()) {
-    bind_user_channel(request.at("uid").get<std::string>(), channel);
-  }
-
-  const auto type = static_cast<Protocol::BattleRequestType>(request.value(
-      "type", static_cast<int>(Protocol::BattleRequestType::ERROR)));
-  logging::log("[dispatch][battle] type={}({}) request={}",
-               logging::request_type_name(type), static_cast<int>(type),
-               request.dump());
-
-  const auto it = std::find_if(
-      COMMAND_TABLE.begin(), COMMAND_TABLE.end(),
-      [type](const CommandDescriptor &entry) { return entry.type == type; });
-  if (it == COMMAND_TABLE.end()) {
-    logging::log("[dispatch][battle] unknown type={}({})",
-                 logging::request_type_name(type), static_cast<int>(type));
-    return Protocol::ShortEnvelope::make_env(Protocol::SERVICE_FAIL |
-                                             Protocol::BAD_REQUEST);
-  }
-
-  return it->dispatch(*this, request);
+  bind_channel(request, channel);
+  return dispatch_table("battle", Protocol::BattleRequestType::ERROR,
+                        COMMAND_TABLE, request);
 }

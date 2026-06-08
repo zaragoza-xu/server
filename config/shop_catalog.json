@@ -1,9 +1,13 @@
 {
-  "version": "shop-v1",
+  "version": "shop-v2",
   "itemIds": [
-    "1",
-    "2",
-    "3",
-    "4"
+    "knife_1",
+    "pistol_1",
+    "knife_2",
+    "pistol_2",
+    "knife_3",
+    "pistol_3",
+    "knife_4",
+    "pistol_4"
   ]
 }

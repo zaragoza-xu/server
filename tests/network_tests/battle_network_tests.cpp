@@ -6,7 +6,6 @@
 #include <gtest/gtest.h>
 
 #include "integration_helpers.h"
-#include "protocol.h"
 
 namespace {
 
@@ -58,6 +57,44 @@ static json direction_to(const json &position) {
     return json{{"x", 1.0}, {"y", 0.0}};
   }
   return json{{"x", x / len}, {"y", y / len}};
+}
+
+static Battle::WeaponDef test_gun() {
+  Battle::WeaponDef weapon;
+  weapon.weaponId = "test_gun";
+  weapon.weaponName = "test gun";
+  weapon.damage = 5.0;
+  weapon.attackSpeed = 0.0;
+  weapon.range = 5000.0;
+  weapon.critMultiplier = 1.0;
+  weapon.projectileCount = 1;
+  weapon.projectile.speed = 1.0;
+  weapon.projectile.size = 0.25;
+  weapon.tags = {"weapon", "ranged", "test"};
+  return weapon;
+}
+
+static void use_test_gun(network_tests::MultiServiceHarness &harness) {
+  auto state = harness.get_state();
+  state->shopCatalogItemIds = {"test_gun"};
+  state->battleConfig = Battle::default_battle_config();
+  state->battleConfig.weapons = {test_gun()};
+}
+
+static void enter_map_with_test_gun(network_tests::MultiServiceHarness &harness,
+                                    int roomId, const std::string &uid) {
+  network_tests::lobby_ready(harness, uid);
+
+  auto shop = harness.make_shop_client();
+  shop->send_json(
+      json{{"type", static_cast<int>(Protocol::ShopRequestType::SHOP_BUY)},
+           {"uid", uid},
+           {"itemId", "test_gun"}});
+  const json buyPush = shop->read_json();
+  ASSERT_EQ(buyPush.at("type").get<int>(),
+            static_cast<int>(Protocol::ShopResponseType::SHOP_SYNC));
+
+  network_tests::select_first_map_node(harness, roomId, {uid});
 }
 
 static json read_frame_until(const std::shared_ptr<FakeClient> &client,
@@ -150,9 +187,10 @@ TEST(BattleNetworkTest, BattlePlayerReadyWhenNotInRoomReturnsRoomStateError) {
 
 TEST(BattleNetworkTest, BattleServer_PlayerShootBroadcastsSpawn) {
   network_tests::MultiServiceHarness harness;
+  use_test_gun(harness);
   const std::string uid = network_tests::auth_register_login(harness);
   const int roomId = network_tests::lobby_create_room(harness, uid, 1);
-  network_tests::enter_map(harness, roomId, {uid});
+  enter_map_with_test_gun(harness, roomId, uid);
 
   auto battle = harness.make_battle_client();
   battle->send_json(json{
@@ -163,6 +201,13 @@ TEST(BattleNetworkTest, BattleServer_PlayerShootBroadcastsSpawn) {
         frame, static_cast<int>(Protocol::BattlePushMessageType::BATTLE_START));
   });
   ASSERT_FALSE(startFrame.is_null());
+  EXPECT_FALSE(startFrame.at("data").contains("enemyEntities"));
+  EXPECT_FALSE(startFrame.at("data").contains("bulletEntities"));
+  ASSERT_FALSE(startFrame.at("data").at("playerEntities").empty());
+  const auto &player = startFrame.at("data").at("playerEntities").front();
+  EXPECT_EQ(player.at("weaponId").get<std::string>(), "test_gun");
+  EXPECT_FALSE(player.contains("weapon"));
+  EXPECT_FALSE(player.contains("weaponType"));
 
   battle->send_json(json{
       {"type", static_cast<int>(Protocol::BattleRequestType::PLAYER_SHOOT)},
@@ -172,15 +217,35 @@ TEST(BattleNetworkTest, BattleServer_PlayerShootBroadcastsSpawn) {
     return frame_has_event(frame, Protocol::BattleEventType::BULLET_SPAWN);
   });
   ASSERT_FALSE(shootFrame.is_null());
+  EXPECT_FALSE(shootFrame.at("data").contains("bulletEntities"));
   EXPECT_TRUE(
       frame_has_event(shootFrame, Protocol::BattleEventType::BULLET_SPAWN));
+  for (const auto &event : shootFrame.at("data").at("events")) {
+    if (event.at("eventType").get<int>() !=
+        static_cast<int>(Protocol::BattleEventType::BULLET_SPAWN)) {
+      continue;
+    }
+    const auto &bullet = event.at("spawnParameter").at("bulletEntity");
+    EXPECT_TRUE(event.at("spawnParameter").at("playerEntity").is_null());
+    EXPECT_TRUE(event.at("spawnParameter").at("enemyEntity").is_null());
+    const auto &attribute = bullet.at("attribute");
+    EXPECT_TRUE(attribute.contains("speed"));
+    EXPECT_TRUE(attribute.contains("size"));
+    EXPECT_FALSE(bullet.contains("projectile"));
+    EXPECT_FALSE(attribute.contains("canPierce"));
+    EXPECT_FALSE(attribute.contains("pierceCount"));
+    EXPECT_FALSE(attribute.contains("projectilePrefab"));
+    EXPECT_FALSE(attribute.contains("sprite"));
+    break;
+  }
 }
 
 TEST(BattleNetworkTest, BattleServer_PlayerBulletHitEnemyBroadcastsDamage) {
   network_tests::MultiServiceHarness harness;
+  use_test_gun(harness);
   const std::string uid = network_tests::auth_register_login(harness);
   const int roomId = network_tests::lobby_create_room(harness, uid, 1);
-  network_tests::enter_map(harness, roomId, {uid});
+  enter_map_with_test_gun(harness, roomId, uid);
 
   auto battle = harness.make_battle_client();
   battle->send_json(json{
@@ -191,6 +256,8 @@ TEST(BattleNetworkTest, BattleServer_PlayerBulletHitEnemyBroadcastsDamage) {
         frame, static_cast<int>(Protocol::BattlePushMessageType::BATTLE_START));
   });
   ASSERT_FALSE(startFrame.is_null());
+  EXPECT_FALSE(startFrame.at("data").contains("enemyEntities"));
+  EXPECT_FALSE(startFrame.at("data").contains("bulletEntities"));
   const json enemy = first_spawned_enemy(startFrame);
   ASSERT_FALSE(enemy.is_null());
   const json shootDir = direction_to(enemy.at("position"));
@@ -244,6 +311,44 @@ TEST(BattleNetworkTest, BattleServer_StartFrameCarriesEnemySpawnEvent) {
             static_cast<int>(Protocol::EntityType::ENEMY));
   EXPECT_EQ(enemy.at("enemyType").get<int>(),
             static_cast<int>(Protocol::BattleEnemyType::BUBBLE_FISH));
+  EXPECT_TRUE(enemy.at("attribute").contains("attackCooldownTicks"));
+  EXPECT_FALSE(enemy.at("attribute").contains("knockbackResist"));
+}
+
+TEST(BattleNetworkTest, BattleServer_PositionSyncStillAcceptsEnemyPositions) {
+  network_tests::MultiServiceHarness harness;
+  const std::string uid = network_tests::auth_register_login(harness);
+  const int roomId = network_tests::lobby_create_room(harness, uid, 1);
+  network_tests::enter_map(harness, roomId, {uid});
+
+  auto battle = harness.make_battle_client();
+  battle->send_json(json{
+      {"type", static_cast<int>(Protocol::BattleRequestType::PLAYER_READY)},
+      {"uid", uid}});
+  const json startFrame = read_frame_until(battle, [](const json &frame) {
+    return push_messages_contains(
+        frame, static_cast<int>(Protocol::BattlePushMessageType::BATTLE_START));
+  });
+  ASSERT_FALSE(startFrame.is_null());
+  const json enemy = first_spawned_enemy(startFrame);
+  ASSERT_FALSE(enemy.is_null());
+
+  const json enemyReport{
+      {"entityId", enemy.at("entityId").get<int>()},
+      {"position", enemy.at("position")},
+      {"direction", {{"x", 0.0}, {"y", 1.0}}},
+  };
+  battle->send_json(json{
+      {"type", static_cast<int>(Protocol::BattleRequestType::POSITION_SYNC)},
+      {"uid", uid},
+      {"playerPosition", {{"x", 0.0}, {"y", 0.0}}},
+      {"playerDirection", {{"x", 1.0}, {"y", 0.0}}},
+      {"enemyPositions", json::array({enemyReport})},
+  });
+  const json rsp = battle->read_json();
+  EXPECT_EQ(rsp.at("type").get<int>(),
+            static_cast<int>(Protocol::BattleResponseType::BATTLE_FRAME));
+  EXPECT_FALSE(rsp.contains("code"));
 }
 
 } // namespace

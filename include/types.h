@@ -125,4 +125,65 @@ struct MapNode {
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(MapNode, nodeId, type, nextId)
 };
 
+enum class BattleRequestType {
+  PLAYER_READY = 0,
+  POSITION_SYNC = 1,
+  PLAYER_SHOOT = 2,
+  ERROR = 100,
+};
+
+enum class BattleResponseType {
+  BATTLE_WAIT = 0,
+  BATTLE_FRAME = 1,
+  ERROR = 100,
+};
+
+enum BattlePushMessageType {
+  BATTLE_START = 0,
+  BATTLE_END = 1,
+};
+
+enum class EntityType {
+  PLAYER = 0,
+  ENEMY = 1,
+  PLAYER_BULLET = 10,
+  ENEMY_BULLET = 11,
+  WALL = 20,
+
+  NONE = 999,
+};
+
+enum class BattleEnemyType { BUBBLE_FISH = 0 };
+
+enum class BattleBulletType {
+  SELF_BULLET = 0,
+  PLAYER_BULLET = 1,
+  ENEMY_BULLET = 2
+};
+
+enum class BattleEventType {
+  ENEMY_SPAWN = 0,
+  BULLET_SPAWN = 1,
+
+  BULLET_HIT_ENEMY = 10,
+  BULLET_HIT_PLAYER = 11,
+  BULLET_HIT_WALL = 12,
+  WEAPON_HIT_ENEMY = 13,
+
+  ENTITY_DAMAGE = 20,
+  ENTITY_DESTROY = 21,
+
+  ENEMY_INTENT_CHANGE = 30,
+};
+
+enum class BattleEntityDestroyReason {
+  UNKNOWN = 0,
+  BULLET_HIT_ENTITY = 1,
+  BULLET_HIT_WALL = 2,
+  BULLET_TIMEOUT = 3,
+
+  ENTITY_DEAD = 10,
+  ENTITY_SELF_EXPLODE = 11,
+};
+
 } // namespace Protocol

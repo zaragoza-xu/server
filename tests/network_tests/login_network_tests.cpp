@@ -8,8 +8,6 @@
 
 namespace {
 
-using json = nlohmann::json;
-
 TEST(LoginNetworkTest, RegisterAndLoginOverTcp) {
   network_tests::ServerHarness<LoginServer> harness;
   auto client = harness.make_client();
@@ -40,11 +38,32 @@ TEST(LoginNetworkTest, UnknownTypeReturnsBadRequest) {
   EXPECT_EQ(rsp.at("code"), (Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST));
 }
 
+TEST(LoginNetworkTest, MissingTypeReturnsBadRequest) {
+  network_tests::ServerHarness<LoginServer> harness;
+  auto client = harness.make_client();
+
+  client->send_json(json::object());
+  const json rsp = client->read_json();
+  EXPECT_EQ(rsp.at("code"), (Protocol::SERVICE_FAIL | Protocol::BAD_REQUEST));
+}
+
 TEST(LoginNetworkTest, InvalidJsonReturnsDeserializeError) {
   network_tests::ServerHarness<LoginServer> harness;
   auto client = harness.make_client();
 
   client->send_frame("{invalid json");
+  const json rsp = client->read_json();
+  EXPECT_EQ(rsp.at("code"),
+            (Protocol::SYSTEM_ERROR | Protocol::DESERIALIZE_FAIL));
+}
+
+TEST(LoginNetworkTest, WrongFieldTypeReturnsDeserializeError) {
+  network_tests::ServerHarness<LoginServer> harness;
+  auto client = harness.make_client();
+
+  client->send_json(
+      json{{"type", static_cast<int>(Protocol::LoginRequestType::LOGIN)},
+           {"uid", 42}});
   const json rsp = client->read_json();
   EXPECT_EQ(rsp.at("code"),
             (Protocol::SYSTEM_ERROR | Protocol::DESERIALIZE_FAIL));

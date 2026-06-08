@@ -11,8 +11,6 @@
 #include "logging.h"
 #include "server.h"
 
-using json = nlohmann::json;
-
 namespace {
 
 struct RuntimeConfig {

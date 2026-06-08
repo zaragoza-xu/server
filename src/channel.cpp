@@ -15,8 +15,6 @@
 #include "protocol.h"
 #include "server.h"
 
-using json = nlohmann::json;
-
 namespace {
 constexpr char FRAME_DELIMITER = '\n';
 } // namespace

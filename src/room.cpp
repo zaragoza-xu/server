@@ -86,12 +86,13 @@ Room::Room(int roomId, size_t maximumPeople, std::shared_ptr<ServerState> state,
           ? shared_state->shopCatalogItemIds
           : []() -> const std::vector<std::string> & {
     static const std::vector<std::string> fallback = {
-        "sword", "shield", "potion", "boots", "wand"};
+        "knife_1", "pistol_1", "knife_2", "pistol_2",
+        "knife_3", "pistol_3", "knife_4", "pistol_4"};
     return fallback;
   }();
   if (shared_state) {
     shopCatalogVersion = shared_state->shopCatalogVersion;
-    if (!shared_state->battleConfig.enemies.empty()) {
+    if (battle_config_complete(shared_state->battleConfig)) {
       battleConfig = shared_state->battleConfig;
     }
   } else {
