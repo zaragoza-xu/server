@@ -56,7 +56,7 @@ private:
   std::vector<Protocol::BattleEventDTO> pendingBattleEvents;
   int battleTick = 0;
   int nextBattleEntityId = 1;
-  int nextBattleSpawnTick = 1;
+  int nextBattleSpawnTick = 0;
   bool battleStarted = false;
   std::mt19937 battleRng;
   mutable std::mutex roomMutex;

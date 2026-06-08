@@ -8,8 +8,6 @@
 
 namespace {
 
-using json = nlohmann::json;
-
 TEST(ChannelNetworkTest, RequestLineMayUseCrLf) {
   network_tests::ServerHarness<LoginServer> harness;
   auto client = harness.make_client();

@@ -126,8 +126,9 @@ inline void from_json(const json &j, BattleBulletEntity &e) {
 struct BattleEnemyAttribute {
   int currentHP = 0;
   int maxHP = 0;
+  int attackCooldownTicks = 1;
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(BattleEnemyAttribute, currentHP,
-                                              maxHP)
+                                              maxHP, attackCooldownTicks)
 };
 
 struct BattleEnemyEntity : BattleEntity {
@@ -193,9 +194,9 @@ struct BattleEventDTO {
   struct SpawnParameter {
     int entityId = 0;
     EntityType entityType = EntityType::PLAYER;
-    BattlePlayerEntity playerEntity;
-    BattleEnemyEntity enemyEntity;
-    BattleBulletEntity bulletEntity;
+    std::optional<BattlePlayerEntity> playerEntity;
+    std::optional<BattleEnemyEntity> enemyEntity;
+    std::optional<BattleBulletEntity> bulletEntity;
 
     SpawnParameter() = default;
     explicit SpawnParameter(const BattlePlayerEntity &entity)
@@ -207,10 +208,6 @@ struct BattleEventDTO {
     explicit SpawnParameter(const BattleBulletEntity &entity)
         : entityId(entity.entityId), entityType(entity.entityType),
           bulletEntity(entity) {}
-
-    NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(SpawnParameter, entityId,
-                                                entityType, playerEntity,
-                                                enemyEntity, bulletEntity)
   };
 
   struct HitParameter {
@@ -292,6 +289,31 @@ struct BattleEventDTO {
   std::optional<DestroyParameter> destroyParameter;
   std::optional<IntentParameter> intentParameter;
 };
+inline void to_json(json &j, const BattleEventDTO::SpawnParameter &p) {
+  j["entityId"] = p.entityId;
+  j["entityType"] = p.entityType;
+  j["playerEntity"] =
+      p.playerEntity ? json(p.playerEntity.value()) : json(nullptr);
+  j["enemyEntity"] =
+      p.enemyEntity ? json(p.enemyEntity.value()) : json(nullptr);
+  j["bulletEntity"] =
+      p.bulletEntity ? json(p.bulletEntity.value()) : json(nullptr);
+}
+inline void from_json(const json &j, BattleEventDTO::SpawnParameter &p) {
+  if (j.contains("entityId"))
+    j.at("entityId").get_to(p.entityId);
+  if (j.contains("entityType"))
+    j.at("entityType").get_to(p.entityType);
+  p.playerEntity.reset();
+  p.enemyEntity.reset();
+  p.bulletEntity.reset();
+  if (j.contains("playerEntity") && !j.at("playerEntity").is_null())
+    p.playerEntity = j.at("playerEntity").get<BattlePlayerEntity>();
+  if (j.contains("enemyEntity") && !j.at("enemyEntity").is_null())
+    p.enemyEntity = j.at("enemyEntity").get<BattleEnemyEntity>();
+  if (j.contains("bulletEntity") && !j.at("bulletEntity").is_null())
+    p.bulletEntity = j.at("bulletEntity").get<BattleBulletEntity>();
+}
 inline void to_json(json &j, const BattleEventDTO &e) {
   j["eventType"] = e.eventType;
   j["eventTick"] = e.eventTick;
@@ -341,13 +363,10 @@ struct BattleWaitRsp {
 struct BattleFrameRsp {
   int serverTick = 0;
   std::vector<BattlePlayerEntity> playerEntities;
-  std::vector<BattleEnemyEntity> enemyEntities;
-  std::vector<BattleBulletEntity> bulletEntities;
   std::vector<BattleEventDTO> events;
 
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(BattleFrameRsp, serverTick,
-                                              playerEntities, enemyEntities,
-                                              bulletEntities, events);
+                                              playerEntities, events);
 };
 } // namespace Protocol
 

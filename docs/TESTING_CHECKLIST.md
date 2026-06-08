@@ -46,7 +46,7 @@
 	- `MAP_INIT -> {map}`
 	- `MAP_SYNC -> {selectStatus}`
 	- `BATTLE_WAIT -> {gameFrame, readyCount, totalCount}`
-	- `BATTLE_FRAME -> {serverTick, playerEntities, enemyEntities, bulletEntities, events}`
+	- `BATTLE_FRAME -> {serverTick, playerEntities, events}`
 
 ### 1.4 错误码契约
 
@@ -138,7 +138,7 @@
 - `PLAYER_READY` 只有在 `MAP` 阶段且已提交当前地图节点后才成功。
 - `PLAYER_READY` 未全员就绪时广播 `BATTLE_WAIT`。
 - 全员就绪时首个广播应为 `BATTLE_FRAME`，且 `pushMessages` 含 `BATTLE_START`。
-- `BATTLE_SYNC` 上报玩家位置和怪物位置；玩家位置直接转发，怪物位置在 tick 中按实体均值聚合。
+- `BATTLE_SYNC` 上报玩家位置和怪物位置；`BATTLE_FRAME` 只同步玩家实体和事件，不包含每帧怪物/子弹实体列表。
 - `PLAYER_SHOOT` 生成玩家子弹和 `BULLET_SPAWN`；后续 tick 推进子弹，命中墙/敌人时产生 hit、damage、destroy 事件。
 - 非 `BATTLE` 阶段调用 `BATTLE_SYNC` / `PLAYER_SHOOT` 应返回 `ROOM_STATE_ERROR`。
 - 战斗结束帧应带 `BATTLE_END`。

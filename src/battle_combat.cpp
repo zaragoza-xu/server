@@ -210,10 +210,14 @@ void Room::spawn_enemies_locked(
     enemyState.entity.direction = Battle::BattleVector2{0.0, 0.0};
     enemyState.entity.attribute.maxHP = spec.maxHP;
     enemyState.entity.attribute.currentHP = spec.maxHP;
+    enemyState.entity.attribute.attackCooldownTicks =
+        std::max(1, spec.attackCooldownTicks);
     enemyState.attackRange = spec.attackRange;
     enemyState.maxSpeed = spec.maxSpeed;
     enemyState.attackDamage = spec.attackDamage;
-    enemyState.attackCooldownTicks = spec.attackCooldownTicks;
+    enemyState.attackCooldownTicks =
+        enemyState.entity.attribute.attackCooldownTicks;
+    enemyState.nextAttackTick = battleTick + enemyState.attackCooldownTicks;
     // Initial target is part of the spawn frame so clients can animate at once.
     const bool targetChanged = update_target_locked(enemyState);
 
