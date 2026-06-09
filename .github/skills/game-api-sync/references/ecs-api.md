@@ -2,6 +2,8 @@
 
 ## Agent 必须先执行（每次调用 ECS 前，勿让用户手动）
 
+在 **PowerShell 终端**由 Agent 自动运行：
+
 ```powershell
 $env:API_SYNC_BASE = "http://120.27.249.20"
 $env:API_SYNC_TOKEN = "ed7484c01552b1d3c271870a4c128bc7e1c0e5b92c732d33"
@@ -15,11 +17,10 @@ $h = @{ Authorization = "Bearer $env:API_SYNC_TOKEN" }
 | GET | `/health` | 无需 Token |
 | GET | `/api/snapshot/modules` | 已有快照模块列表 |
 | GET | `/api/snapshot?module=战斗` | 模块快照 JSON |
-| POST | `/jobs/refresh-cache` | Body：`{"module":"战斗"}` 或 `{}` |
-| POST | `/jobs/api-compare` | Body：`module`、`repo`、`files` |
-| POST | `/jobs/api-doc-sync` | Body：`module`、`repo`、`summary`、`files_changed`、`docx_draft`、`target`（`summary` 与 `docx_draft` 至少其一） |
-| GET | `/api/wiki-nodes` | Wiki 节点缓存列表 |
-| GET | `/api/status` | 各模块缓存 revision |
+| POST | `/jobs/refresh-cache` | Body：`{"module":"战斗"}`；可选 `"force":true` 跳过 revision 比对 |
+| POST | `/jobs/api-compare` | Body：`module`、`repo`、`files`（**须含** `config/message_aliases.yaml`）；可选 `target`、`scoped` |
+| POST | `/jobs/api-doc-sync` | Body：`module`、`repo`、`summary`、`files_changed`、`docx_draft`、`target` |
+| GET | `/api/status` | 各模块 `cached_at`、`fetched_at`、`api_docs`/`type_constraints` revision |
 
 ## 示例
 
@@ -33,6 +34,10 @@ Invoke-RestMethod -Headers $h $uri | ConvertTo-Json -Depth 20 | Out-File -Encodi
 
 Invoke-RestMethod -Method Post -Headers $h -ContentType "application/json" `
   -Body '{"module":"战斗"}' "$env:API_SYNC_BASE/jobs/refresh-cache"
+
+# 飞书刚改完 / 强制全量拉取
+Invoke-RestMethod -Method Post -Headers $h -ContentType "application/json" `
+  -Body '{"module":"战斗","force":true}' "$env:API_SYNC_BASE/jobs/refresh-cache"
 ```
 
 ## 权威飞书文档

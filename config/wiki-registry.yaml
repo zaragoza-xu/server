@@ -44,64 +44,32 @@ module_map:
     server_glob:
       - include/types.h
       - include/protocol.h
-      - include/user.h
-      - include/server.h
-      - src/server.cpp
   开始界面:
     server_glob:
       - include/types.h
       - include/protocol.h
-      - include/room.h
-      - include/server.h
-      - src/server.cpp
-      - src/room.cpp
   联机大厅:
     server_glob:
       - include/types.h
       - include/protocol.h
-      - include/room.h
-      - include/server.h
-      - src/room.cpp
-      - src/server.cpp
   地图:
     server_glob:
       - include/types.h
       - include/protocol.h
-      - include/room.h
-      - include/server.h
-      - src/map.cpp
-      - src/room.cpp
-      - src/server.cpp
   商店:
     server_glob:
       - include/types.h
       - include/protocol.h
-      - include/room.h
-      - include/server.h
-      - src/server.cpp
-      - src/room.cpp
   战斗:
     server_glob:
+      - include/types.h
       - include/battle.h
       - include/battle_config.h
-      - include/room.h
-      - include/server.h
-      - src/battle_server.cpp
-      - src/battle_room.cpp
-      - src/room.cpp
   网络相关:
     server_glob:
-      - include/channel.h
+      - include/types.h
       - include/protocol.h
-      - include/server.h
       - include/logging.h
-      - src/channel.cpp
-      - src/server.cpp
-      - src/main.cpp
   玩家存档:
     server_glob:
       - include/types.h
-      - include/user.h
-      - include/protocol.h
-      - include/server.h
-      - src/server.cpp

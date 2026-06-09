@@ -1,5 +1,7 @@
 ---
 
+---
+
 ## 飞书接口文档协作（game-api-sync）
 
 飞书 Wiki 为协议唯一权威源（SSOT）。文档快照与写回草稿经 **ECS** 完成；成员机**不运行** `lark-cli`。
@@ -29,10 +31,11 @@ $h = @{ Authorization = "Bearer $env:API_SYNC_TOKEN" }
 
 | 场景   | 说明                                                                                                                                                                   |
 | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 刷新缓存 | `POST /jobs/refresh-cache`，Body 含 `module` 或 `{}` 全量                                                                                                                 |
-| 对比   | 按 [registry-globs.md](.github/game-api-sync/registry-globs.md) 确定 `files` → `POST /jobs/api-compare`（按章节/方向/消息 + 字段类型）；**不改代码**                                                        |
-| 对齐   | 取 snapshot → 合并 glob、用户 @ 路径与目录排查 → 漏网协议文件须**更新** `config/wiki-registry.yaml` → 只改范围内已有文件；**禁止** `Generated/`；用户自行 commit                                            |
-| 写回飞书 | 模式 A：**h2**、**无 caption**、pre×2、**无【合并位置】**、无实例；ECS 插入 h1 客户端/服务端 分区末；见 [doc-write-format.md](.github/game-api-sync/doc-write-format.md) |
+| 刷新缓存 | 对齐/对比/写回前先 `POST /jobs/refresh-cache` **当前模块**（默认 revision 比对；`"force":true` 强制全量）；全量所有模块仅当用户明确要求 |
+| 对比   | refresh → [registry-globs.md](.github/game-api-sync/registry-globs.md) 确定 `files`（**含** `config/message_aliases.yaml`）→ `POST /jobs/api-compare`；**不改代码**（IDE 主动；Actions 不跑 compare） |
+| 对齐   | 取 snapshot → 合并 glob、用户 @ 路径与目录排查 → **Glob 门禁** → 只改范围内已有文件；**禁止** `Generated/`；用户自行 commit |
+| 写回飞书（CI） | PR **合并**时 sync（任意目标分支）；仅 PR 变更协议文件；Job Summary 为 sync 状态（无对比报告） |
+| 写回飞书（IDE） | 模式 A：**h2**、**无 caption**、pre×2、**无【合并位置】**、无实例；ECS 插入 h1 客户端/服务端 分区末；见 [doc-write-format.md](.github/game-api-sync/doc-write-format.md) |
 
 
 更多 API 与 JSON Body：[workflows.md](.github/game-api-sync/workflows.md)、[ecs-api.md](.github/game-api-sync/ecs-api.md)。协作底线：[baseline.md](.github/game-api-sync/baseline.md)。
@@ -42,4 +45,3 @@ $h = @{ Authorization = "Bearer $env:API_SYNC_TOKEN" }
 - 本机 `lark-cli`、自动开 PR、切换分支
 - 新建 `Generated/` 或平行协议目录
 - 未纳入范围的文件不得因 glob 误匹配被修改
-

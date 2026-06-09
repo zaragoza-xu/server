@@ -1,0 +1,29 @@
+# 飞书章节名 / section → 代码英文类型名（各游戏仓宜与中央仓同步）
+# diff_api 匹配顺序：pre 内英文名 → 本节 alias → 代码 index
+
+登录界面:
+  注册请求: RegisterReq
+  登录请求: LoginReq
+
+开始界面:
+  State查询: StateQueryReq
+
+联机大厅:
+  开启房间: CreateRoomReq
+  加入房间: JoinRoomReq
+  刷新房间: ListRoomsReq
+  用户准备: SetReadyReq
+
+商店:
+  初始化: ShopInitReq
+  信息同步: ShopPlayerInfo
+
+战斗:
+  准备 (切换场景完成): BattlePlayerReadyReq
+  位置同步: BattleSyncReq
+  攻击: BattlePlayerShootReq
+  BATTLE_WAIT: BattleWaitRsp
+  BATTLE_FRAME: BattleFrameRsp
+
+地图:
+  移动: MapMoveReq
