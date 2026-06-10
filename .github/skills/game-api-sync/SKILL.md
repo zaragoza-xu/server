@@ -71,11 +71,27 @@ description: >-
 用户说「根据当前代码变更，生成飞书文档更新草稿」时：
 
 1. 先执行 `references/env-setup.md` 中的环境变量。
-2. **`POST /jobs/refresh-cache`**，Body：`{"module":"<模块名>"}`（默认 revision 比对；用户要求强制时加 `"force":true`）
-3. **必读** `references/doc-write-format.md`：模式 A → **h2 主题**、**禁止 h1 子主题**、**禁止 caption 当分区**、**禁止 docx_draft 含【合并位置】**；enum+type → **两个 pre**；**禁止**实例行。ECS 按 `repo` 插入 **h1 客户端/服务端** 分区末尾。
-4. 生成 **DocxXML**（伪 TS），`target` 与 `repo` 一致。
-5. `POST /jobs/api-doc-sync`（`docx_draft` 与 `summary` 至少其一）。
-6. 回复贴出 **docx_draft** 全文（不含【合并位置】）；说明审阅后去掉「（agent生成，待审查）」即可。
+2. 确定**模块名**与**变更路径**（`git diff` 或用户 @ 的文件）。
+3. **在游戏仓根目录**运行（`<中央仓>` 为 game-api-sync 克隆路径）：
+
+```powershell
+python <中央仓>/scripts/agent_doc_draft.py `
+  --module <模块名> --repo client|server `
+  --paths <路径1> <路径2> ... `
+  [--user-explicit <用户@的路径...>] `
+  --apply-glob
+```
+
+   - 也可用 `--git-since origin/main` 代替 `--paths`（取相对 HEAD 的变更文件）。
+   - `--apply-glob`：将漏网协议路径写入 `config/wiki-registry.yaml`；**必须提醒用户核对 git diff**。
+   - 未加 `--apply-glob` 且 `needs_registry_update` 时，**先列出 `missing_from_glob` 并暂停**，待用户确认 registry 后再继续。
+   - CLI 内部：`glob 检查` → `refresh-cache` → `compare` → 按 `sync_targets_for_module` 分流（**struct/class → api_docs，enum/interface → type_constraints**）→ `build_docx_draft`（标记 **agent生成，待审查**）。
+   - 输出 JSON 的 `drafts[].api_doc_sync_body` 可直接用于下一步；`docx_draft` 为空或 `skipped` 时说明原因，勿手写 XML 除非 CLI 无法覆盖。
+
+4. 对每个未 `skipped` 的 draft：`POST /jobs/api-doc-sync`（Body 用 `api_doc_sync_body`）；或加 `--sync` 由 CLI 一并 POST。
+5. 回复：`user_action_required`（若有）、各 target 的 classification、**docx_draft** 摘要；说明审阅后去掉「（agent生成，待审查）」即可。
+
+**禁止**默认跳过 CLI 手写 DocxXML。格式细节见 `references/doc-write-format.md`（兜底）。
 
 ### 禁止
 

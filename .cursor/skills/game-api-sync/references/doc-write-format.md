@@ -27,4 +27,8 @@
 
 ## 流程
 
-snapshot → DocxXML（无合并位置段）→ `api-doc-sync` → 回复说明审阅要点即可。
+**主路径**：在游戏仓运行 `scripts/agent_doc_draft.py` → 读 JSON 中 `drafts` → `api-doc-sync`（或 `--sync`）。
+
+CLI 已按 target 分流并生成 DocxXML；本文件仅作 CLI 失败时的格式兜底。
+
+snapshot → agent_doc_draft.py → api-doc-sync → 回复说明审阅要点即可。

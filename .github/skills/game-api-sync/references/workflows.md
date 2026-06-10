@@ -43,6 +43,8 @@
 
 ## api-doc-sync Body
 
+Agent **须先**运行 `scripts/agent_doc_draft.py`（见 SKILL「同步文档草稿到飞书」），再用输出的 `api_doc_sync_body`：
+
 ```json
 {
   "module": "战斗",
@@ -50,10 +52,10 @@
   "target": "api_docs",
   "summary": "变更说明",
   "files_changed": ["Assets/Scripts/Battle/Foo.cs"],
-  "docx_draft": "<h2>武器（agent生成，待审查）</h2><pre lang=\"TypeScript\"><code>enum ...</code></pre><pre lang=\"TypeScript\"><code>type ...</code></pre>"
+  "docx_draft": "<h2>武器（agent生成，待审查）</h2><pre lang=\"TypeScript\"><code>...</code></pre>"
 }
 ```
 
-`summary` 与 `docx_draft` 至少其一。主题用 **`h2`（模式 A）** 或 **`h1`（模式 B）**，须带 **`（agent生成，待审查）`**；**禁止**【合并位置】段落；不用 callout。ECS 按 `repo` 插入 **h1 客户端/服务端** 分区末尾（无对应 h1 时 append 文末）。
+`summary` 与 `docx_draft` 至少其一。分流规则与 CI 相同：**struct/class → api_docs**，**enum/interface → type_constraints**（`sync_targets_for_module`）。
 
-**写文档格式**：见 `doc-write-format.md`。glob 见 `registry-globs.md`。
+**写文档格式**（CLI 兜底）：见 `doc-write-format.md`。glob 见 `registry-globs.md`。

@@ -43,6 +43,17 @@
 5. **提醒用户核对**：列出本次新增 glob 路径、`skipped_auto_add` 及原因；**用户确认或修正 registry 后再继续改代码**。  
 6. 若 ECS 也部署中央 `wiki-registry.yaml`，提醒管理员同步 server/client 两份。
 
+## 写回飞书草稿时的 Glob 门禁
+
+**写回文档**须先运行 `scripts/agent_doc_draft.py`（与对齐共用 `check_paths_for_align` 逻辑）：
+
+```bash
+python <中央仓>/scripts/agent_doc_draft.py --module <模块> --repo client --paths <...> --apply-glob
+```
+
+- 未加 `--apply-glob` 且 `needs_registry_update` → 列出 `missing_from_glob`，提醒用户确认后再 `--apply-glob` 或手改 registry。
+- `--apply-glob` 写入 `suggested_glob` 后 **必须提醒用户核对 git diff**（PyYAML 重写可能丢失 YAML 注释）。
+
 ## 更新 glob（对比 / 写回时同样适用）
 
 当用户通过 **@文件**、**/agent**、或对话指明「这些也是本模块协议文件」，且它们**不在当前 glob 结果中**时，Agent **应自行更新**本仓库 `config/wiki-registry.yaml`（同一 PR / 同一会话内完成，勿只改代码不更新 registry）：
