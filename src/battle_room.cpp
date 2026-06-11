@@ -2,6 +2,8 @@
 #include "room.h"
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -17,6 +19,35 @@ Protocol::BattleBulletAttribute
 bullet_attribute(const Battle::ProjectileDef &projectile) {
   return {.speed = projectile.speed, .size = projectile.size};
 }
+
+double player_radius(const Battle::BattleConfig &cfg) {
+  return std::max(0.0, cfg.playerRadius);
+}
+
+double enemy_range(const Battle::BattleConfig &cfg,
+                   const Battle::EnemyState &enemyState) {
+  return enemyState.attackRange + cfg.enemyRadius + player_radius(cfg);
+}
+
+double segment_hit_t(const BattleVector2 &from, const BattleVector2 &to,
+                     const BattleVector2 &target, double radiusSquared) {
+  const BattleVector2 delta{to.x - from.x, to.y - from.y};
+  const double lenSquared = Battle::length_squared(delta);
+  if (lenSquared <= 0.0) {
+    return Battle::distance_squared(from, target) <= radiusSquared
+               ? 0.0
+               : std::numeric_limits<double>::infinity();
+  }
+
+  const BattleVector2 toTarget{target.x - from.x, target.y - from.y};
+  const double t =
+      std::clamp((toTarget.x * delta.x + toTarget.y * delta.y) / lenSquared,
+                 0.0, 1.0);
+  const BattleVector2 closest{from.x + delta.x * t, from.y + delta.y * t};
+  return Battle::distance_squared(closest, target) <= radiusSquared
+             ? t
+             : std::numeric_limits<double>::infinity();
+}
 } // namespace
 
 void Room::reset_battle_state_locked() {
@@ -24,6 +55,7 @@ void Room::reset_battle_state_locked() {
   battleTick = 0;
   nextBattleEntityId = 1;
   nextBattleSpawnTick = 0;
+  spawnBudget = 0.0;
   battlePlayersByUid.clear();
   battleWeaponsByUid.clear();
   battleEnemyStates.clear();
@@ -64,6 +96,7 @@ void Room::start_battle_locked() {
     player.uid = uid;
     player.position = BattleVector2{static_cast<float>(spawnIndex * 2), 0.0f};
     player.direction = BattleVector2{0.0f, 0.0f};
+    player.attribute.speed = battleConfig.playerSpeed;
     player.attribute.maxHP = battleConfig.playerMaxHP;
     player.attribute.currentHP = battleConfig.playerMaxHP;
     auto ownedIt = ownedItemsByUid.find(uid);
@@ -115,7 +148,7 @@ bool Room::set_battle_ready(const std::string &uid,
 
 void Room::apply_enemy_reports_locked() {
   // Clients simulate enemy movement, but the server averages valid reports and
-  // still enforces speed/bounds before accepting them.
+  // still enforces speed before accepting them.
   for (auto &[enemyId, enemyState] : battleEnemyStates) {
     double x = 0.0;
     double y = 0.0;
@@ -145,8 +178,8 @@ void Room::apply_enemy_reports_locked() {
       if (player == nullptr) {
         continue;
       }
-      const double rangeSquared =
-          enemyState.attackRange * enemyState.attackRange;
+      const double attackRange = enemy_range(battleConfig, enemyState);
+      const double rangeSquared = attackRange * attackRange;
       if (Battle::distance_squared(enemyState.entity.position,
                                    player->position) <= rangeSquared) {
         enemyState.entity.direction = {0.0, 0.0};
@@ -154,7 +187,7 @@ void Room::apply_enemy_reports_locked() {
       }
       const auto oldPosition = enemyState.entity.position;
       enemyState.entity.position =
-          step_to(oldPosition, player->position, enemyState.maxSpeed);
+          step_to(oldPosition, player->position, enemy_step(enemyState));
       enemyState.entity.direction =
           Battle::norm_or_zero({enemyState.entity.position.x - oldPosition.x,
                                 enemyState.entity.position.y - oldPosition.y});
@@ -164,7 +197,7 @@ void Room::apply_enemy_reports_locked() {
     const auto oldPosition = enemyState.entity.position;
     const BattleVector2 target{x / count, y / count};
     enemyState.entity.position =
-        step_to(oldPosition, target, enemyState.maxSpeed);
+        step_to(oldPosition, target, enemy_step(enemyState));
     const auto movement =
         Battle::norm_or_zero({enemyState.entity.position.x - oldPosition.x,
                               enemyState.entity.position.y - oldPosition.y});
@@ -188,8 +221,9 @@ void Room::tick_enemy_attacks_locked() {
     if (player == nullptr) {
       continue;
     }
+    const double attackRange = enemy_range(battleConfig, enemyState);
     if (Battle::distance_squared(enemyState.entity.position, player->position) >
-        enemyState.attackRange * enemyState.attackRange) {
+        attackRange * attackRange) {
       continue;
     }
 
@@ -213,26 +247,27 @@ void Room::tick_spawn_locked() {
   if (battleTick < nextBattleSpawnTick) {
     return;
   }
+  const double time = battle_time_locked();
+  const double difficulty = battle_difficulty_locked();
+  const double budgetPerInterval = battleConfig.baseSpawnBudget * difficulty;
   while (battleTick >= nextBattleSpawnTick) {
     const int intervalTicks = std::max(
         1, static_cast<int>(std::round(battleConfig.spawnIntervalSeconds *
                                        battleConfig.frameRate)));
+    spawnBudget += budgetPerInterval;
     nextBattleSpawnTick += intervalTicks;
   }
 
-  const double time = battle_time_locked();
-  const double difficulty = battle_difficulty_locked();
-  double budget = battleConfig.baseSpawnBudget * difficulty;
   const auto pool = enemy_pool_locked(time, difficulty);
 
   std::vector<Battle::EnemySpawnSpec> spawns;
   while (1) {
-    auto picked = pick_enemy_locked(pool, budget);
+    auto picked = pick_enemy_locked(pool, spawnBudget);
     if (!picked.has_value()) {
       break;
     }
     picked->position = spawn_pos_locked();
-    budget -= picked->cost;
+    spawnBudget -= picked->cost;
     spawns.push_back(std::move(*picked));
   }
   spawn_enemies_locked(spawns);
@@ -250,21 +285,12 @@ void Room::tick_bullets_locked() {
                                     : battleConfig.bulletRadius;
     const double hitRadius = bulletRadius + battleConfig.enemyRadius;
     const double hitDistanceSquared = hitRadius * hitRadius;
+    const BattleVector2 prevPosition = bullet.position;
 
     bullet.position.x += bullet.direction.x;
     bullet.position.y += bullet.direction.y;
     bulletState.rangeLeft -=
         std::sqrt(Battle::length_squared(bullet.direction));
-
-    if (is_outside_battle(bullet.position)) {
-      push_event_locked(EventType::BULLET_HIT_WALL,
-                        HitParam(bullet.entityId, EntityType::PLAYER_BULLET, 0,
-                                 EntityType::WALL, bullet.position));
-      push_event_locked(EventType::ENTITY_DESTROY,
-                        DestroyParam(bullet.entityId, EntityType::PLAYER_BULLET,
-                                     DestroyReason::BULLET_HIT_WALL));
-      continue;
-    }
 
     if (bulletState.rangeLeft <= 0.0) {
       push_event_locked(EventType::ENTITY_DESTROY,
@@ -274,16 +300,17 @@ void Room::tick_bullets_locked() {
     }
 
     auto enemyIt = battleEnemyStates.end();
-    double nearestHitDistance = hitDistanceSquared;
+    double nearestHitT = std::numeric_limits<double>::infinity();
     for (auto it = battleEnemyStates.begin(); it != battleEnemyStates.end();
          ++it) {
       if (bulletState.hitEnemyIds.count(it->first) > 0) {
         continue;
       }
-      const double candidateDistance =
-          Battle::distance_squared(bullet.position, it->second.entity.position);
-      if (candidateDistance <= nearestHitDistance) {
-        nearestHitDistance = candidateDistance;
+      const double candidateT =
+          segment_hit_t(prevPosition, bullet.position,
+                        it->second.entity.position, hitDistanceSquared);
+      if (std::isfinite(candidateT) && candidateT <= nearestHitT) {
+        nearestHitT = candidateT;
         enemyIt = it;
       }
     }
@@ -396,7 +423,6 @@ bool Room::tick_battle(Protocol::BattleFrameRsp &frame, bool *ended) {
 
 bool Room::sync_battle(const std::string &uid,
                        const BattleVector2 &playerPosition,
-                       const BattleVector2 &playerDirection,
                        const std::vector<Protocol::BattlePos> &enemyPositions) {
   std::lock_guard<std::mutex> lock(roomMutex);
   if (phase != Phase::BATTLE || !battleStarted) {
@@ -407,19 +433,17 @@ bool Room::sync_battle(const std::string &uid,
   if (player == nullptr) {
     return false;
   }
-  if (is_valid_vector(playerPosition) && is_valid_vector(playerDirection)) {
-    player->position = clamp_battle(playerPosition);
-    player->direction = playerDirection;
+  if (is_valid_vector(playerPosition)) {
+    player->position = playerPosition;
   }
 
   auto &enemyById = enemyPosByUid[uid];
   enemyById.clear();
-  // Invalid or out-of-bounds enemy reports are dropped before the next tick.
+  // Invalid enemy reports are dropped before the next tick.
   for (const auto &enemyPosition : enemyPositions) {
     if (!has_enemy_locked(enemyPosition.entityId) ||
         !is_valid_vector(enemyPosition.position) ||
-        !is_valid_vector(enemyPosition.direction) ||
-        is_outside_battle(enemyPosition.position)) {
+        !is_valid_vector(enemyPosition.direction)) {
       continue;
     }
     enemyById[enemyPosition.entityId] = enemyPosition;
@@ -459,7 +483,10 @@ bool Room::shoot_battle_player(const std::string &uid,
       auto &bullet = bulletState.entity;
       bullet.entityId = nextBattleEntityId++;
       bullet.entityType = Protocol::EntityType::PLAYER_BULLET;
-      bullet.position = player->position;
+      const double startOffset = player_radius(battleConfig);
+      bullet.position =
+          BattleVector2{player->position.x + attackDir.x * startOffset,
+                        player->position.y + attackDir.y * startOffset};
       bullet.type = Protocol::BattleBulletType::PLAYER_BULLET;
       auto projectile = weapon->projectile;
       if (projectile.speed <= 0.0) {
@@ -470,7 +497,6 @@ bool Room::shoot_battle_player(const std::string &uid,
       bulletState.sourceUid = player->uid;
       bulletState.damage = weapon_damage_locked(*weapon);
       bulletState.rangeLeft = battle_range(*weapon);
-      bullet.weaponId = weapon->weaponId;
       bullet.attribute = bullet_attribute(projectile);
       bulletState.weapon = *weapon;
       bulletState.remainingPierce =

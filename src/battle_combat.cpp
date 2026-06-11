@@ -14,6 +14,15 @@ using namespace Battle;
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kClientUnit = 100.0;
 
+double player_radius(const BattleConfig &cfg) {
+  return std::max(0.0, cfg.playerRadius);
+}
+
+double melee_range(const BattleConfig &cfg, const WeaponDef &weapon) {
+  return std::max(0.0, weapon.range / kClientUnit) + player_radius(cfg) +
+         cfg.enemyRadius;
+}
+
 std::optional<BattleEnemyPool> pool_for_node(MapNode::NodeType nodeType) {
   switch (nodeType) {
   case MapNode::NodeType::NORMAL:
@@ -147,17 +156,10 @@ BattleVector2 Room::spawn_pos_locked() {
   std::uniform_real_distribution<double> radiusRoll(
       battleConfig.spawnRadiusMin, battleConfig.spawnRadiusMax);
 
-  BattleVector2 candidate{anchor.x + battleConfig.spawnRadiusMin, anchor.y};
-  for (int tries = 0; tries < 16; ++tries) {
-    const double angle = angleRoll(battleRng);
-    const double radius = radiusRoll(battleRng);
-    candidate = {anchor.x + std::cos(angle) * radius,
-                 anchor.y + std::sin(angle) * radius};
-    if (!is_outside_battle(candidate)) {
-      return candidate;
-    }
-  }
-  return clamp_battle(candidate);
+  const double angle = angleRoll(battleRng);
+  const double radius = radiusRoll(battleRng);
+  return {anchor.x + std::cos(angle) * radius,
+          anchor.y + std::sin(angle) * radius};
 }
 
 bool Room::update_target_locked(Battle::EnemyState &enemyState) {
@@ -210,13 +212,14 @@ void Room::spawn_enemies_locked(
     enemyState.entity.direction = Battle::BattleVector2{0.0, 0.0};
     enemyState.entity.attribute.maxHP = spec.maxHP;
     enemyState.entity.attribute.currentHP = spec.maxHP;
-    enemyState.entity.attribute.attackCooldownTicks =
+    enemyState.entity.attribute.speed =
+        std::max(0, static_cast<int>(std::round(spec.maxSpeed)));
+    enemyState.entity.attribute.attackCoolDown =
         std::max(1, spec.attackCooldownTicks);
     enemyState.attackRange = spec.attackRange;
     enemyState.maxSpeed = spec.maxSpeed;
     enemyState.attackDamage = spec.attackDamage;
-    enemyState.attackCooldownTicks =
-        enemyState.entity.attribute.attackCooldownTicks;
+    enemyState.attackCooldownTicks = enemyState.entity.attribute.attackCoolDown;
     enemyState.nextAttackTick = battleTick + enemyState.attackCooldownTicks;
     // Initial target is part of the spawn frame so clients can animate at once.
     const bool targetChanged = update_target_locked(enemyState);
@@ -234,19 +237,15 @@ void Room::spawn_enemies_locked(
 
 const Battle::WeaponDef *
 Room::equip_weapon_locked(const std::vector<std::string> &items) const {
-  const Battle::WeaponDef *best = nullptr;
-  for (const auto &item : items) {
+  for (auto itemIt = items.rbegin(); itemIt != items.rend(); ++itemIt) {
     for (const auto &weapon : battleConfig.weapons) {
-      if (weapon.weaponId != item) {
+      if (weapon.weaponId != *itemIt) {
         continue;
       }
-      if (best == nullptr || weapon.damage > best->damage) {
-        best = &weapon;
-      }
-      break;
+      return &weapon;
     }
   }
-  return best;
+  return nullptr;
 }
 
 const Battle::WeaponDef *
@@ -279,7 +278,7 @@ int Room::cooldown_ticks_locked(const Battle::WeaponDef &weapon) const {
 }
 
 double Room::battle_range(const Battle::WeaponDef &weapon) const {
-  return std::max(0.0, weapon.range / kClientUnit);
+  return std::max(0.0, weapon.range);
 }
 
 void Room::lifesteal_locked(const std::string &uid, int damage,
@@ -317,7 +316,7 @@ void Room::hit_enemy_locked(Protocol::BattleEnemyEntity &enemy, int hitSourceId,
 void Room::melee_attack_locked(Protocol::BattlePlayerEntity &player,
                                const Battle::WeaponDef &weapon,
                                const BattleVector2 &direction) {
-  const double range = battle_range(weapon);
+  const double range = melee_range(battleConfig, weapon);
   const double rangeSquared = range * range;
   const int damage = weapon_damage_locked(weapon);
 

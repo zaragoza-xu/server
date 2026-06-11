@@ -51,7 +51,7 @@ struct BattleEntity {
 // ===== 玩家相关 =====
 
 struct BattlePlayerAttribute {
-  double speed = 0.25;
+  double speed = 1.5;
   int currentHP = 0;
   int maxHP = 0;
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(BattlePlayerAttribute, speed,
@@ -102,21 +102,17 @@ struct BattleBulletAttribute {
 
 struct BattleBulletEntity : BattleEntity {
   BattleBulletType type = BattleBulletType::SELF_BULLET;
-  std::string weaponId;
   BattleBulletAttribute attribute;
 };
 inline void to_json(json &j, const BattleBulletEntity &e) {
   to_json(j, static_cast<const BattleEntity &>(e));
   j["type"] = e.type;
-  j["weaponId"] = e.weaponId;
   j["attribute"] = e.attribute;
 }
 inline void from_json(const json &j, BattleBulletEntity &e) {
   from_json(j, static_cast<BattleEntity &>(e));
   if (j.contains("type"))
     j.at("type").get_to(e.type);
-  if (j.contains("weaponId"))
-    j.at("weaponId").get_to(e.weaponId);
   if (j.contains("attribute"))
     j.at("attribute").get_to(e.attribute);
 }
@@ -126,9 +122,10 @@ inline void from_json(const json &j, BattleBulletEntity &e) {
 struct BattleEnemyAttribute {
   int currentHP = 0;
   int maxHP = 0;
-  int attackCooldownTicks = 1;
+  int speed = 3;
+  int attackCoolDown = 1;
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(BattleEnemyAttribute, currentHP,
-                                              maxHP, attackCooldownTicks)
+                                              maxHP, speed, attackCoolDown)
 };
 
 struct BattleEnemyEntity : BattleEntity {
@@ -171,11 +168,9 @@ struct BattleSyncReq {
   BattleRequestType type;
   std::string uid;
   BattleVector2 playerPosition;
-  BattleVector2 playerDirection;
   std::vector<BattlePos> enemyPositions;
   NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(BattleSyncReq, type, uid,
-                                              playerPosition, playerDirection,
-                                              enemyPositions)
+                                              playerPosition, enemyPositions)
 };
 
 struct BattlePlayerShootReq {

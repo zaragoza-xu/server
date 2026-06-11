@@ -134,8 +134,7 @@ int Server::battle_sync(const Protocol::BattleSyncReq &req,
     return resolveCode;
   }
 
-  if (!room->sync_battle(req.uid, req.playerPosition, req.playerDirection,
-                         req.enemyPositions)) {
+  if (!room->sync_battle(req.uid, req.playerPosition, req.enemyPositions)) {
     return Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR;
   }
   return Protocol::SERVICE_SUCCESS;
