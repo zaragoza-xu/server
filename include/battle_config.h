@@ -25,6 +25,8 @@ struct BattleEnemyDef {
 
 struct BattleConfig {
   int playerMaxHP = 20;
+  double playerSpeed = 1.5;
+  double playerRadius = 0.4;
   int frameRate = 60;
   double durationSeconds = 180.0;
   double spawnIntervalSeconds = 0.5;
@@ -33,9 +35,7 @@ struct BattleConfig {
   double maxCostFactor = 3.0;
   double spawnRadiusMin = 8.0;
   double spawnRadiusMax = 12.0;
-  double battleMin = -20.0;
-  double battleMax = 20.0;
-  double bulletSpeed = 1.0;
+  double bulletSpeed = 3.0;
   int bulletDamage = 5;
   double bulletRadius = 0.25;
   double enemyRadius = 0.75;

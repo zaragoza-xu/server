@@ -11,6 +11,10 @@
 
 std::vector<Protocol::MapNode> generate_map();
 
+namespace {
+std::vector<std::string> starter_items() { return {"pistol_1"}; }
+} // namespace
+
 int Room::get_item_index(const std::string &itemId) const {
   const size_t visible_count = std::min(uids.size(), shopItemIds.size());
   auto visible_end =
@@ -78,7 +82,7 @@ Room::Room(int roomId, size_t maximumPeople, std::shared_ptr<ServerState> state,
   uids.push_back(creator_uid);
   readyStates.emplace(creator_uid, false);
   battleReadyStates.emplace(creator_uid, false);
-  ownedItemsByUid.emplace(creator_uid, std::vector<std::string>{});
+  ownedItemsByUid.emplace(creator_uid, starter_items());
 
   auto shared_state = this->state.lock();
   const std::vector<std::string> &catalog =
@@ -154,7 +158,7 @@ bool Room::add_member(std::shared_ptr<User> user) {
   uids.push_back(uid);
   readyStates.emplace(uid, false);
   battleReadyStates.emplace(uid, false);
-  ownedItemsByUid.emplace(uid, std::vector<std::string>{});
+  ownedItemsByUid.emplace(uid, starter_items());
   return true;
 }
 

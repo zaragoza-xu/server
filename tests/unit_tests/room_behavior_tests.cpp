@@ -488,14 +488,13 @@ TEST(RoomTest, BattleShootSpawnsNormalizedBullet) {
   Protocol::BattleFrameRsp frame;
   start_battle(*harness.room, harness.uid, frame);
 
-  ASSERT_TRUE(
-      harness.room->sync_battle(harness.uid, {0.0, 0.0}, {0.0, 1.0}, {}));
+  ASSERT_TRUE(harness.room->sync_battle(harness.uid, {0.0, 0.0}, {}));
   ASSERT_TRUE(harness.room->shoot_battle_player(harness.uid, {10.0, 0.0}));
   ASSERT_TRUE(harness.room->tick_battle(frame));
 
   ASSERT_EQ(frame.playerEntities.size(), 1U);
   EXPECT_DOUBLE_EQ(frame.playerEntities.front().direction.x, 0.0);
-  EXPECT_DOUBLE_EQ(frame.playerEntities.front().direction.y, 1.0);
+  EXPECT_DOUBLE_EQ(frame.playerEntities.front().direction.y, 0.0);
 
   const int spawnIndex =
       find_event(frame.events, Protocol::BattleEventType::BULLET_SPAWN);
@@ -504,7 +503,8 @@ TEST(RoomTest, BattleShootSpawnsNormalizedBullet) {
   const auto &spawn = *frame.events[spawnIndex].spawnParameter;
   ASSERT_TRUE(spawn.bulletEntity.has_value());
   EXPECT_EQ(spawn.entityId, spawn.bulletEntity->entityId);
-  EXPECT_DOUBLE_EQ(spawn.bulletEntity->position.x, 0.0);
+  EXPECT_DOUBLE_EQ(spawn.bulletEntity->position.x,
+                   harness.state->battleConfig.playerRadius);
   EXPECT_DOUBLE_EQ(spawn.bulletEntity->position.y, 0.0);
   EXPECT_DOUBLE_EQ(spawn.bulletEntity->direction.x, 1.0);
   EXPECT_DOUBLE_EQ(spawn.bulletEntity->direction.y, 0.0);
@@ -519,8 +519,7 @@ TEST(RoomTest, BattleRangedWeaponFallsBackWhenProjectileSpeedIsZero) {
   Protocol::BattleFrameRsp frame;
   start_battle(*harness.room, harness.uid, frame);
 
-  ASSERT_TRUE(
-      harness.room->sync_battle(harness.uid, {0.0, 0.0}, {1.0, 0.0}, {}));
+  ASSERT_TRUE(harness.room->sync_battle(harness.uid, {0.0, 0.0}, {}));
   ASSERT_TRUE(harness.room->shoot_battle_player(harness.uid, {1.0, 0.0}));
   ASSERT_TRUE(harness.room->tick_battle(frame));
 
@@ -530,9 +529,48 @@ TEST(RoomTest, BattleRangedWeaponFallsBackWhenProjectileSpeedIsZero) {
   ASSERT_TRUE(frame.events[spawnIndex].spawnParameter.has_value());
   const auto &spawn = *frame.events[spawnIndex].spawnParameter;
   ASSERT_TRUE(spawn.bulletEntity.has_value());
-  EXPECT_DOUBLE_EQ(spawn.bulletEntity->direction.x, 1.0);
-  EXPECT_DOUBLE_EQ(spawn.bulletEntity->position.x, 0.0);
-  EXPECT_DOUBLE_EQ(spawn.bulletEntity->attribute.speed, 1.0);
+  EXPECT_DOUBLE_EQ(spawn.bulletEntity->direction.x,
+                   harness.state->battleConfig.bulletSpeed);
+  EXPECT_DOUBLE_EQ(spawn.bulletEntity->position.x,
+                   harness.state->battleConfig.playerRadius);
+  EXPECT_DOUBLE_EQ(spawn.bulletEntity->attribute.speed,
+                   harness.state->battleConfig.bulletSpeed);
+}
+
+TEST(RoomTest, BattleBulletRangeUsesWorldUnits) {
+  auto state = std::make_shared<ServerState>();
+  state->shopCatalogItemIds = {"test_gun"};
+  state->battleConfig = default_battle_config();
+  state->battleConfig.baseSpawnBudget = 1.0;
+
+  auto weapon = test_gun();
+  weapon.range = 5.0;
+  state->battleConfig.weapons = {weapon};
+  auto enemy = test_enemy();
+  enemy.cost = 1000.0;
+  state->battleConfig.enemies = {enemy};
+
+  Protocol::PlayerBasicInfo creatorInfo{"1", "creator", 1};
+  state->userData.emplace(creatorInfo.uid,
+                          Protocol::PlayerData{.basicInfo = creatorInfo});
+  auto creator = std::make_shared<User>(creatorInfo.uid, state);
+  Room room(81, 1, state, creator);
+  buy_and_select(room, creatorInfo.uid, "test_gun");
+
+  Protocol::BattleWaitRsp waitRsp;
+  bool allReady = false;
+  ASSERT_TRUE(room.set_battle_ready(creatorInfo.uid, waitRsp, allReady));
+  ASSERT_TRUE(allReady);
+
+  Protocol::BattleFrameRsp frame;
+  ASSERT_TRUE(room.tick_battle(frame));
+  ASSERT_TRUE(room.shoot_battle_player(creatorInfo.uid, {1.0, 0.0}));
+  ASSERT_TRUE(room.tick_battle(frame));
+
+  EXPECT_GE(find_event(frame.events, Protocol::BattleEventType::BULLET_SPAWN),
+            0);
+  EXPECT_EQ(find_event(frame.events, Protocol::BattleEventType::ENTITY_DESTROY),
+            -1);
 }
 
 TEST(RoomTest, BattleShootRejectsInvalidDirections) {
@@ -591,6 +629,19 @@ TEST(RoomTest, BattleEquipsWeaponItemOnStart) {
   EXPECT_EQ(player->weaponId, "pistol_1");
 }
 
+TEST(RoomTest, BattleEquipsStarterPistolOnStart) {
+  auto harness = make_room();
+
+  Protocol::BattleFrameRsp frame;
+  start_battle(*harness.room, harness.uid, frame);
+
+  const auto player = find_player(frame, harness.uid);
+  ASSERT_TRUE(player.has_value());
+  EXPECT_EQ(player->weaponId, "pistol_1");
+  ASSERT_EQ(player->items.size(), 1U);
+  EXPECT_EQ(player->items.front(), "pistol_1");
+}
+
 TEST(RoomTest, BattlePistolUsesWeaponDamageAndCooldown) {
   auto harness = make_room_with_catalog({"pistol_1"});
   buy_and_select(*harness.room, harness.uid, "pistol_1");
@@ -602,7 +653,7 @@ TEST(RoomTest, BattlePistolUsesWeaponDamageAndCooldown) {
   const Battle::BattleVector2 playerPos{enemy->position.x - 4.0,
                                         enemy->position.y};
   const auto shotDir = dir_to(playerPos, enemy->position);
-  ASSERT_TRUE(harness.room->sync_battle(harness.uid, playerPos, shotDir, {}));
+  ASSERT_TRUE(harness.room->sync_battle(harness.uid, playerPos, {}));
 
   ASSERT_TRUE(harness.room->shoot_battle_player(harness.uid, shotDir));
   EXPECT_FALSE(harness.room->shoot_battle_player(harness.uid, shotDir));
@@ -611,11 +662,14 @@ TEST(RoomTest, BattlePistolUsesWeaponDamageAndCooldown) {
       find_event(frame.events, Protocol::BattleEventType::BULLET_SPAWN);
   ASSERT_GE(spawnIndex, 0);
   ASSERT_TRUE(frame.events[spawnIndex].spawnParameter.has_value());
-  ASSERT_TRUE(frame.events[spawnIndex].spawnParameter->bulletEntity.has_value());
-  EXPECT_EQ(frame.events[spawnIndex].spawnParameter->bulletEntity->weaponId,
-            "pistol_1");
+  ASSERT_TRUE(
+      frame.events[spawnIndex].spawnParameter->bulletEntity.has_value());
+  EXPECT_FALSE(json(*frame.events[spawnIndex].spawnParameter->bulletEntity)
+                   .contains("weaponId"));
 
-  ASSERT_TRUE(tick_until_enemy_damage(*harness.room, frame));
+  if (find_damage_to(frame.events, Protocol::EntityType::ENEMY) < 0) {
+    ASSERT_TRUE(tick_until_enemy_damage(*harness.room, frame));
+  }
 
   const int damageIndex =
       find_damage_to(frame.events, Protocol::EntityType::ENEMY);
@@ -635,8 +689,7 @@ TEST(RoomTest, BattleKnifeHitsInRangeWithoutBullet) {
   const Battle::BattleVector2 playerPos{enemy->position.x - 1.0,
                                         enemy->position.y};
 
-  ASSERT_TRUE(
-      harness.room->sync_battle(harness.uid, playerPos, {1.0, 0.0}, {}));
+  ASSERT_TRUE(harness.room->sync_battle(harness.uid, playerPos, {}));
   ASSERT_TRUE(harness.room->shoot_battle_player(harness.uid, {1.0, 0.0}));
   ASSERT_TRUE(harness.room->tick_battle(frame));
 
@@ -649,6 +702,26 @@ TEST(RoomTest, BattleKnifeHitsInRangeWithoutBullet) {
   ASSERT_GE(damageIndex, 0);
   ASSERT_TRUE(frame.events[damageIndex].damageParameter.has_value());
   EXPECT_GE(frame.events[damageIndex].damageParameter->damage, 11);
+}
+
+TEST(RoomTest, BattleKnifeRangeIncludesEntityRadii) {
+  auto harness = make_room_with_catalog({"knife_1"});
+  buy_and_select(*harness.room, harness.uid, "knife_1");
+
+  Protocol::BattleFrameRsp frame;
+  start_battle(*harness.room, harness.uid, frame);
+  const auto enemy = first_spawned_enemy(frame);
+  ASSERT_TRUE(enemy.has_value());
+  const Battle::BattleVector2 playerPos{enemy->position.x - 2.5,
+                                        enemy->position.y};
+
+  ASSERT_TRUE(harness.room->sync_battle(harness.uid, playerPos, {}));
+  ASSERT_TRUE(harness.room->shoot_battle_player(harness.uid, {1.0, 0.0}));
+  ASSERT_TRUE(harness.room->tick_battle(frame));
+
+  EXPECT_GE(
+      find_event(frame.events, Protocol::BattleEventType::WEAPON_HIT_ENEMY), 0);
+  EXPECT_GE(find_damage_to(frame.events, Protocol::EntityType::ENEMY), 0);
 }
 
 TEST(RoomTest, BattleStartPushesInitialIntentChange) {
@@ -712,7 +785,6 @@ TEST(RoomTest, BattleBulletHitDamagesEnemy) {
             Protocol::EntityType::PLAYER_BULLET);
   EXPECT_EQ(frame.events[destroyIndex].destroyParameter->destroyReason,
             Protocol::BattleEntityDestroyReason::BULLET_HIT_ENTITY);
-
 }
 
 TEST(RoomTest, BattleBulletKillDestroysEnemy) {
@@ -728,7 +800,7 @@ TEST(RoomTest, BattleBulletKillDestroysEnemy) {
   const Battle::BattleVector2 playerPos{enemy->position.x - 4.0,
                                         enemy->position.y};
   const auto shotDir = dir_to(playerPos, enemy->position);
-  ASSERT_TRUE(harness.room->sync_battle(harness.uid, playerPos, shotDir, {}));
+  ASSERT_TRUE(harness.room->sync_battle(harness.uid, playerPos, {}));
 
   ASSERT_TRUE(harness.room->shoot_battle_player(harness.uid, shotDir));
   ASSERT_TRUE(tick_until_enemy_destroy(*harness.room, frame, enemyId));
@@ -755,7 +827,6 @@ TEST(RoomTest, BattleBulletKillDestroysEnemy) {
                    Protocol::BattleEntityDestroyReason::ENTITY_DEAD;
       });
   EXPECT_NE(enemyDestroyed, frame.events.end());
-
 }
 
 TEST(RoomTest, BattleWavesKeepRunningAfterOneEnemyDies) {
@@ -772,7 +843,7 @@ TEST(RoomTest, BattleWavesKeepRunningAfterOneEnemyDies) {
   const Battle::BattleVector2 playerPos{enemy->position.x - 4.0,
                                         enemy->position.y};
   const auto shotDir = dir_to(playerPos, enemy->position);
-  ASSERT_TRUE(harness.room->sync_battle(harness.uid, playerPos, shotDir, {}));
+  ASSERT_TRUE(harness.room->sync_battle(harness.uid, playerPos, {}));
 
   ASSERT_TRUE(harness.room->shoot_battle_player(harness.uid, shotDir));
   bool ended = false;
@@ -793,8 +864,7 @@ TEST(RoomTest, EnemyReportsAreSpeedLimited) {
   report.entityId = enemy->entityId;
   report.position = {0.0, 0.0};
   report.direction = dir_to(enemy->position, report.position);
-  ASSERT_TRUE(
-      harness.room->sync_battle(harness.uid, {0.0, 0.0}, {0.0, 1.0}, {report}));
+  ASSERT_TRUE(harness.room->sync_battle(harness.uid, {0.0, 0.0}, {report}));
   ASSERT_TRUE(harness.room->tick_battle(frame));
   EXPECT_EQ(find_event(frame.events, Protocol::BattleEventType::ENTITY_DAMAGE),
             -1);
@@ -809,8 +879,14 @@ TEST(RoomTest, EnemyFallbackMovesWhenClientsDoNotReport) {
   Protocol::BattleFrameRsp frame;
   start_battle(*harness.room, harness.uid, frame);
 
+  for (int tick = 0; tick < 40; ++tick) {
+    ASSERT_TRUE(harness.room->tick_battle(frame));
+    EXPECT_EQ(
+        find_event(frame.events, Protocol::BattleEventType::ENTITY_DAMAGE), -1);
+  }
+
   ASSERT_TRUE(tick_until(*harness.room, frame,
-                         Protocol::BattleEventType::ENTITY_DAMAGE, 40));
+                         Protocol::BattleEventType::ENTITY_DAMAGE, 800));
   const int damageIndex =
       find_event(frame.events, Protocol::BattleEventType::ENTITY_DAMAGE);
   ASSERT_GE(damageIndex, 0);
@@ -820,7 +896,10 @@ TEST(RoomTest, EnemyFallbackMovesWhenClientsDoNotReport) {
 }
 
 TEST(RoomTest, EnemyAttackDamagesPlayer) {
-  auto harness = make_room();
+  auto enemy = test_enemy();
+  enemy.attackDamage = 4;
+  enemy.attackRange = 100.0;
+  auto harness = make_room_with_weapon(test_gun(), {enemy});
   Protocol::BattleFrameRsp frame;
   start_battle(*harness.room, harness.uid, frame);
   ASSERT_EQ(frame.playerEntities.front().attribute.currentHP, 20);
@@ -843,6 +922,28 @@ TEST(RoomTest, EnemyAttackDamagesPlayer) {
   EXPECT_EQ(player->attribute.currentHP, 16);
 }
 
+TEST(RoomTest, EnemyAttackRangeIncludesEntityRadii) {
+  auto enemy = test_enemy();
+  enemy.attackDamage = 4;
+  auto harness = make_room_with_weapon(test_gun(), {enemy});
+  Protocol::BattleFrameRsp frame;
+  start_battle(*harness.room, harness.uid, frame);
+  const auto spawned = first_spawned_enemy(frame);
+  ASSERT_TRUE(spawned.has_value());
+  const Battle::BattleVector2 playerPos{spawned->position.x - 2.5,
+                                        spawned->position.y};
+
+  ASSERT_TRUE(harness.room->sync_battle(harness.uid, playerPos, {}));
+  ASSERT_TRUE(tick_until(*harness.room, frame,
+                         Protocol::BattleEventType::ENTITY_DAMAGE, 30));
+
+  const int damageIndex =
+      find_damage_to(frame.events, Protocol::EntityType::PLAYER);
+  ASSERT_GE(damageIndex, 0);
+  ASSERT_TRUE(frame.events[damageIndex].damageParameter.has_value());
+  EXPECT_EQ(frame.events[damageIndex].damageParameter->damage, 4);
+}
+
 TEST(RoomTest, EnemySpawnExposesAttackCooldownAttribute) {
   auto enemy = test_enemy();
   enemy.attackCooldownTicks = 7;
@@ -852,7 +953,7 @@ TEST(RoomTest, EnemySpawnExposesAttackCooldownAttribute) {
   start_battle(*harness.room, harness.uid, frame);
   const auto spawned = first_spawned_enemy(frame);
   ASSERT_TRUE(spawned.has_value());
-  EXPECT_EQ(spawned->attribute.attackCooldownTicks, 7);
+  EXPECT_EQ(spawned->attribute.attackCoolDown, 7);
 }
 
 TEST(RoomTest, EnemyAttackUsesCooldownBeforeDamagingAgain) {
@@ -867,8 +968,7 @@ TEST(RoomTest, EnemyAttackUsesCooldownBeforeDamagingAgain) {
   const auto spawned = first_spawned_enemy(frame);
   ASSERT_TRUE(spawned.has_value());
 
-  ASSERT_TRUE(harness.room->sync_battle(harness.uid, spawned->position,
-                                        {0.0, 0.0}, {}));
+  ASSERT_TRUE(harness.room->sync_battle(harness.uid, spawned->position, {}));
   for (int tick = 0; tick < enemy.attackCooldownTicks - 1; ++tick) {
     ASSERT_TRUE(harness.room->tick_battle(frame));
     EXPECT_EQ(find_damage_to(frame.events, Protocol::EntityType::PLAYER), -1);
@@ -886,7 +986,10 @@ TEST(RoomTest, EnemyAttackUsesCooldownBeforeDamagingAgain) {
 }
 
 TEST(RoomTest, BattleDefeatsWhenAllPlayersDie) {
-  auto harness = make_room();
+  auto enemy = test_enemy();
+  enemy.attackDamage = 4;
+  enemy.attackRange = 100.0;
+  auto harness = make_room_with_weapon(test_gun(), {enemy});
   Protocol::BattleFrameRsp frame;
   start_battle(*harness.room, harness.uid, frame);
 
@@ -910,36 +1013,6 @@ TEST(RoomTest, BattleDefeatsWhenAllPlayersDie) {
   EXPECT_FALSE(harness.room->tick_battle(frame));
 }
 
-TEST(RoomTest, BattleBulletHitsWallOutOfBounds) {
-  auto harness = make_room_with_weapon();
-  buy_and_select(*harness.room, harness.uid, "test_gun");
-  Protocol::BattleFrameRsp frame;
-  start_battle(*harness.room, harness.uid, frame);
-
-  ASSERT_TRUE(
-      harness.room->sync_battle(harness.uid, {19.5, 0.0}, {1.0, 0.0}, {}));
-  ASSERT_TRUE(harness.room->shoot_battle_player(harness.uid, {1.0, 0.0}));
-  ASSERT_TRUE(harness.room->tick_battle(frame));
-
-  const int hitIndex =
-      find_event(frame.events, Protocol::BattleEventType::BULLET_HIT_WALL);
-  ASSERT_GE(hitIndex, 0);
-  ASSERT_LT(static_cast<size_t>(hitIndex + 1), frame.events.size());
-  ASSERT_TRUE(frame.events[hitIndex].hitParameter.has_value());
-  EXPECT_EQ(frame.events[hitIndex].hitParameter->targetEntityId, 0);
-  EXPECT_EQ(frame.events[hitIndex].hitParameter->targetEntityType,
-            Protocol::EntityType::WALL);
-  EXPECT_DOUBLE_EQ(frame.events[hitIndex].hitParameter->hitPosition.x, 20.5);
-
-  EXPECT_EQ(frame.events[hitIndex + 1].eventType,
-            Protocol::BattleEventType::ENTITY_DESTROY);
-  ASSERT_TRUE(frame.events[hitIndex + 1].destroyParameter.has_value());
-  EXPECT_EQ(frame.events[hitIndex + 1].destroyParameter->entityType,
-            Protocol::EntityType::PLAYER_BULLET);
-  EXPECT_EQ(frame.events[hitIndex + 1].destroyParameter->destroyReason,
-            Protocol::BattleEntityDestroyReason::BULLET_HIT_WALL);
-}
-
 TEST(RoomTest, BossNodeUsesBossEnemyPool) {
   auto harness = make_room();
   select_boss(*harness.room, harness.uid);
@@ -955,6 +1028,8 @@ TEST(RoomTest, BattleUsesConfiguredStats) {
   auto state = std::make_shared<ServerState>();
   state->battleConfig = default_battle_config();
   state->battleConfig.playerMaxHP = 33;
+  state->battleConfig.playerSpeed = 3.75;
+  state->battleConfig.playerRadius = 0.8;
   state->battleConfig.enemies = {
       {BattleEnemyPool::NORMAL, Protocol::BattleEnemyType::BUBBLE_FISH, 42, 2.5,
        1.4, 0.0, 8, 11, 3.0, 0.0, 100.0},
@@ -971,6 +1046,7 @@ TEST(RoomTest, BattleUsesConfiguredStats) {
   ASSERT_FALSE(frame.playerEntities.empty());
   EXPECT_EQ(frame.playerEntities.front().attribute.maxHP, 33);
   EXPECT_EQ(frame.playerEntities.front().attribute.currentHP, 33);
+  EXPECT_DOUBLE_EQ(frame.playerEntities.front().attribute.speed, 3.75);
 
   const auto enemies = spawned_enemies(frame);
   ASSERT_EQ(enemies.size(), 1U);
@@ -978,11 +1054,9 @@ TEST(RoomTest, BattleUsesConfiguredStats) {
   EXPECT_EQ(enemies.front().attribute.currentHP, 42);
 }
 
-TEST(RoomTest, BattleSpawnClampsFallbackPositionInsideBounds) {
+TEST(RoomTest, BattleSpawnCanUseConfiguredRadiusWithoutBounds) {
   auto state = std::make_shared<ServerState>();
   state->battleConfig = default_battle_config();
-  state->battleConfig.battleMin = -1.0;
-  state->battleConfig.battleMax = 1.0;
   state->battleConfig.spawnRadiusMin = 10.0;
   state->battleConfig.spawnRadiusMax = 10.0;
   state->battleConfig.enemies = {
@@ -1000,10 +1074,42 @@ TEST(RoomTest, BattleSpawnClampsFallbackPositionInsideBounds) {
   start_battle(room, creatorInfo.uid, frame);
   const auto enemies = spawned_enemies(frame);
   ASSERT_EQ(enemies.size(), 1U);
-  EXPECT_GE(enemies.front().position.x, state->battleConfig.battleMin);
-  EXPECT_LE(enemies.front().position.x, state->battleConfig.battleMax);
-  EXPECT_GE(enemies.front().position.y, state->battleConfig.battleMin);
-  EXPECT_LE(enemies.front().position.y, state->battleConfig.battleMax);
+  const double dist = std::sqrt(Battle::distance_squared(
+      enemies.front().position, Battle::BattleVector2{0.0, 0.0}));
+  EXPECT_NEAR(dist, 10.0, 1e-6);
+}
+
+TEST(RoomTest, BattleSpawnBudgetCarriesAcrossIntervals) {
+  auto state = std::make_shared<ServerState>();
+  state->battleConfig = default_battle_config();
+  state->battleConfig.frameRate = 10;
+  state->battleConfig.spawnIntervalSeconds = 0.1;
+  state->battleConfig.baseSpawnBudget = 1.0;
+  state->battleConfig.enemies = {
+      {BattleEnemyPool::NORMAL, Protocol::BattleEnemyType::BUBBLE_FISH, 10, 1.5,
+       1.0, 0.0, 4, 20, 3.0, 0.0, 100.0},
+  };
+
+  Protocol::PlayerBasicInfo creatorInfo{"1", "creator", 1};
+  state->userData.emplace(creatorInfo.uid,
+                          Protocol::PlayerData{.basicInfo = creatorInfo});
+  auto creator = std::make_shared<User>(creatorInfo.uid, state);
+  Room room(80, 1, state, creator);
+
+  select_first_node(room, creatorInfo.uid);
+
+  Protocol::BattleWaitRsp waitRsp;
+  bool allReady = false;
+  ASSERT_TRUE(room.set_battle_ready(creatorInfo.uid, waitRsp, allReady));
+  ASSERT_TRUE(allReady);
+
+  Protocol::BattleFrameRsp frame;
+  ASSERT_TRUE(room.tick_battle(frame));
+  EXPECT_TRUE(spawned_enemies(frame).empty());
+  ASSERT_TRUE(room.tick_battle(frame));
+  EXPECT_TRUE(spawned_enemies(frame).empty());
+  ASSERT_TRUE(room.tick_battle(frame));
+  EXPECT_EQ(spawned_enemies(frame).size(), 1U);
 }
 
 TEST(RoomTest, BattleWinsWhenTimeExpires) {

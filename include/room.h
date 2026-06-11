@@ -57,6 +57,7 @@ private:
   int battleTick = 0;
   int nextBattleEntityId = 1;
   int nextBattleSpawnTick = 0;
+  double spawnBudget = 0.0;
   bool battleStarted = false;
   std::mt19937 battleRng;
   mutable std::mutex roomMutex;
@@ -96,21 +97,6 @@ private:
     pendingBattleEvents.push_back(std::move(event));
   }
 
-  bool is_outside_battle(const Battle::BattleVector2 &position) {
-    return position.x < battleConfig.battleMin ||
-           position.x > battleConfig.battleMax ||
-           position.y < battleConfig.battleMin ||
-           position.y > battleConfig.battleMax;
-  }
-
-  Battle::BattleVector2 clamp_battle(Battle::BattleVector2 position) {
-    position.x =
-        std::clamp(position.x, battleConfig.battleMin, battleConfig.battleMax);
-    position.y =
-        std::clamp(position.y, battleConfig.battleMin, battleConfig.battleMax);
-    return position;
-  }
-
   Battle::BattleVector2 step_to(const Battle::BattleVector2 &from,
                                 const Battle::BattleVector2 &to,
                                 double maxDistance) {
@@ -119,14 +105,19 @@ private:
     const Battle::BattleVector2 delta{to.x - from.x, to.y - from.y};
     const double distSquared = length_squared(delta);
     if (!std::isfinite(distSquared) || distSquared <= 0.0) {
-      return clamp_battle(from);
+      return from;
     }
     if (distSquared <= maxDistance * maxDistance) {
-      return clamp_battle(to);
+      return to;
     }
     const double dist = std::sqrt(distSquared);
-    return clamp_battle({from.x + delta.x / dist * maxDistance,
-                         from.y + delta.y / dist * maxDistance});
+    return {from.x + delta.x / dist * maxDistance,
+            from.y + delta.y / dist * maxDistance};
+  }
+
+  double enemy_step(const Battle::EnemyState &enemyState) const {
+    const int frameRate = std::max(1, battleConfig.frameRate);
+    return enemyState.maxSpeed / frameRate;
   }
 
   int get_item_index(const std::string &itemId) const;
@@ -204,7 +195,6 @@ public:
                         bool &allReady);
   bool sync_battle(const std::string &uid,
                    const Battle::BattleVector2 &playerPosition,
-                   const Battle::BattleVector2 &playerDirection,
                    const std::vector<Protocol::BattlePos> &enemyPositions);
   bool shoot_battle_player(const std::string &uid,
                            const Battle::BattleVector2 &direction);

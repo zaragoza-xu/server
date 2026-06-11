@@ -1,151 +1,183 @@
 {
   "playerMaxHP": 20,
+  "playerSpeed": 1.5,
+  "playerRadius": 0.4,
   "frameRate": 60,
   "durationSeconds": 180,
   "spawnIntervalSeconds": 0.5,
-  "baseSpawnBudget": 4,
+  "baseSpawnBudget": 0.5,
   "difficultyGrowth": 0.08,
   "maxCostFactor": 3,
   "spawnRadiusMin": 8,
   "spawnRadiusMax": 12,
-  "battleMin": -20,
-  "battleMax": 20,
-  "bulletSpeed": 1,
+  "bulletSpeed": 3,
   "bulletDamage": 5,
-  "bulletRadius": 0.25,
-  "enemyRadius": 0.75,
+  "bulletRadius": 0.1,
+  "enemyRadius": 0.4,
   "weapons": [
     {
       "weaponId": "knife_1",
       "weaponName": "knife",
       "damage": 6,
-      "attackSpeed": 1.01,
+      "attackSpeed": 0.2,
       "range": 150,
       "knockback": 2,
       "damageGrowth": 0.8,
       "critChance": 0.2,
       "critMultiplier": 2,
-      "tags": ["weapon", "melee", "knife"]
+      "tags": [
+        "weapon",
+        "melee",
+        "knife"
+      ]
     },
     {
       "weaponId": "knife_2",
       "weaponName": "knife",
       "damage": 9,
-      "attackSpeed": 0.93,
+      "attackSpeed": 0.2,
       "range": 150,
       "knockback": 2,
       "damageGrowth": 0.8,
       "critChance": 0.3,
       "critMultiplier": 2,
-      "tags": ["weapon", "melee", "knife"]
+      "tags": [
+        "weapon",
+        "melee",
+        "knife"
+      ]
     },
     {
       "weaponId": "knife_3",
       "weaponName": "knife",
       "damage": 12,
-      "attackSpeed": 0.86,
+      "attackSpeed": 0.2,
       "range": 150,
       "knockback": 2,
       "damageGrowth": 0.8,
       "critChance": 0.4,
       "critMultiplier": 2,
-      "tags": ["weapon", "melee", "knife"]
+      "tags": [
+        "weapon",
+        "melee",
+        "knife"
+      ]
     },
     {
       "weaponId": "knife_4",
       "weaponName": "knife",
       "damage": 20,
-      "attackSpeed": 0.78,
+      "attackSpeed": 0.2,
       "range": 150,
       "knockback": 2,
       "damageGrowth": 0.8,
       "critChance": 0.5,
       "critMultiplier": 2,
-      "tags": ["weapon", "melee", "knife"]
+      "tags": [
+        "weapon",
+        "melee",
+        "knife"
+      ]
     },
     {
       "weaponId": "pistol_1",
       "weaponName": "pistol",
-      "damage": 12,
-      "attackSpeed": 1.2,
-      "range": 500,
+      "damage": 30,
+      "attackSpeed": 0.2,
+      "range": 50000,
       "knockback": 15,
       "damageGrowth": 1,
       "critChance": 0.05,
       "critMultiplier": 2,
       "projectileCount": 1,
       "projectile": {
-        "speed": 1,
+        "speed": 3,
         "lifetime": 5,
         "size": 0.25,
         "canPierce": true,
         "pierceCount": 1,
         "pierceDamageFactor": 0.75
       },
-      "tags": ["weapon", "ranged", "pistol"]
+      "tags": [
+        "weapon",
+        "ranged",
+        "pistol"
+      ]
     },
     {
       "weaponId": "pistol_2",
       "weaponName": "pistol",
-      "damage": 20,
-      "attackSpeed": 1.2,
-      "range": 500,
+      "damage": 50,
+      "attackSpeed": 0.2,
+      "range": 50000,
       "knockback": 15,
       "damageGrowth": 1,
       "critChance": 0.1,
       "critMultiplier": 2,
       "projectileCount": 1,
       "projectile": {
-        "speed": 1,
+        "speed": 3,
         "lifetime": 5,
         "size": 0.25,
         "canPierce": true,
         "pierceCount": 1,
         "pierceDamageFactor": 0.75
       },
-      "tags": ["weapon", "ranged", "pistol"]
+      "tags": [
+        "weapon",
+        "ranged",
+        "pistol"
+      ]
     },
     {
       "weaponId": "pistol_3",
       "weaponName": "pistol",
-      "damage": 30,
-      "attackSpeed": 1.03,
-      "range": 500,
+      "damage": 70,
+      "attackSpeed": 0.13,
+      "range": 50000,
       "knockback": 15,
       "damageGrowth": 1,
       "critChance": 0.15,
       "critMultiplier": 2,
       "projectileCount": 1,
       "projectile": {
-        "speed": 1,
+        "speed": 3,
         "lifetime": 5,
         "size": 0.25,
         "canPierce": true,
         "pierceCount": 1,
         "pierceDamageFactor": 0.75
       },
-      "tags": ["weapon", "ranged", "pistol"]
+      "tags": [
+        "weapon",
+        "ranged",
+        "pistol"
+      ]
     },
     {
       "weaponId": "pistol_4",
       "weaponName": "pistol",
-      "damage": 50,
-      "attackSpeed": 0.87,
-      "range": 500,
+      "damage": 90,
+      "attackSpeed": 0.1,
+      "range": 50000,
       "knockback": 15,
       "damageGrowth": 1,
       "critChance": 0.2,
       "critMultiplier": 2,
       "projectileCount": 1,
       "projectile": {
-        "speed": 1,
+        "speed": 3,
         "lifetime": 5,
         "size": 0.25,
         "canPierce": true,
         "pierceCount": 1,
         "pierceDamageFactor": 0.75
       },
-      "tags": ["weapon", "ranged", "pistol"]
+      "tags": [
+        "weapon",
+        "ranged",
+        "pistol"
+      ]
     }
   ],
   "enemies": [
