@@ -1,0 +1,75 @@
+# 飞书知识库：接口文档 + 类型约束（权威源）
+space_id: "7561625672666447876"
+
+roots:
+  - key: api_docs
+    node_token: NYw0wSFwji6j3skwW4ocIrkxn6b
+    title: 接口文档
+    wiki_url: https://my.feishu.cn/wiki/NYw0wSFwji6j3skwW4ocIrkxn6b
+  - key: type_constraints
+    node_token: CF6owdEKLiYhwmkBrMxcgxK8nde
+    title: 类型约束
+    wiki_url: https://my.feishu.cn/wiki/CF6owdEKLiYhwmkBrMxcgxK8nde
+
+# 叶子文档 obj_token（用于 docs +fetch / snapshot）
+modules:
+  登录界面:
+    api_docs_obj: Uknrd940iofmdZxwZufcaw4VngQ
+    type_constraints_obj: null
+  开始界面:
+    api_docs_obj: PJKudJjraoK6d6xRynPc5ls5nuf
+    type_constraints_obj: null
+  联机大厅:
+    api_docs_obj: PTfEdBOcRonxcaxVEO4cencun9b
+    type_constraints_obj: LOHfdAtWxou0uYxcQJmciMIlnBc
+  地图:
+    api_docs_obj: IOF8dYZ9so6PINxBUBzcOn6nnve
+    type_constraints_obj: VKoydIqV5oa0ZlxOnYZcpoWtnJd
+  商店:
+    api_docs_obj: DMPZdUSa7opes3xdgm1c5Zc0n9e
+    type_constraints_obj: QJoAdzyc0oqZ1HxVil3cyqxGnsb
+  战斗:
+    api_docs_obj: ZxhjdUHTnoceWpxEk5ScAzvgn07
+    type_constraints_obj: OfEvdsEs3oC6vtxdEzac64msnNj
+  网络相关:
+    api_docs_obj: null
+    type_constraints_obj: TxeXdH4RioFJNUxTqMKcaHfPnvf
+  玩家存档:
+    api_docs_obj: null
+    type_constraints_obj: K6ZpdcD12obhbKxVj3RcdqOonZs
+
+# 代码路径
+module_map:
+  登录界面:
+    server_glob:
+      - include/types.h
+      - include/protocol.h
+  开始界面:
+    server_glob:
+      - include/types.h
+      - include/protocol.h
+  联机大厅:
+    server_glob:
+      - include/types.h
+      - include/protocol.h
+  地图:
+    server_glob:
+      - include/types.h
+      - include/protocol.h
+  商店:
+    server_glob:
+      - include/types.h
+      - include/protocol.h
+  战斗:
+    server_glob:
+      - include/types.h
+      - include/battle.h
+      - include/battle_config.h
+  网络相关:
+    server_glob:
+      - include/types.h
+      - include/protocol.h
+      - include/logging.h
+  玩家存档:
+    server_glob:
+      - include/types.h
