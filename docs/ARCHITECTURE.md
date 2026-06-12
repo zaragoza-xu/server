@@ -228,6 +228,7 @@ classDiagram
    - 全员 `SET_READY=true` 后进入 `SHOP`
 2. `SHOP`
    - 允许 `SHOP_INIT`、`SHOP_MOVE_CURSOR`、`SHOP_BUY`
+   - 临时测试旁路允许直接 `PLAYER_READY` 跳过商店和地图
    - 首次合法 `MAP_INIT` 会生成/返回地图，并推进到 `MAP`
 3. `MAP`
    - 允许 `MAP_INIT`、`MAP_MOVE`
@@ -292,7 +293,8 @@ classDiagram
 
 `PLAYER_READY` 行为：
 
-- 只有 `MAP` 阶段且当前地图节点已经提交时才会成功
+- 临时允许在 `SHOP` 阶段直接成功，使用普通敌人池
+- 在 `MAP` 阶段仍要求当前地图节点已经提交
 - 未全员 ready：广播 `BATTLE_WAIT`
 - 全员 ready：
   - `Room::set_battle_ready()` 内部启动战斗状态
@@ -323,7 +325,8 @@ classDiagram
 - 当前帧敌人清空表示胜利
 - 全部玩家死亡表示失败
 - 结束帧会带 `BattlePushMessageType::BATTLE_END`
-- 胜利且当前地图节点有后继时，`Room` 清空战斗临时状态并回到 `MAP`
+- 直达战斗胜利时，`Room` 清空战斗临时状态并进入 `END`
+- 地图路径胜利且当前地图节点有后继时，`Room` 清空战斗临时状态并回到 `MAP`
 - 失败或最后节点胜利时，`Room` 清空战斗临时状态并进入 `END`
 
 ## 5. 协议契约

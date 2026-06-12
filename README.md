@@ -142,12 +142,13 @@
 
 战斗准备阶段：
 
-- `PLAYER_READY` 只有在 `MAP` 阶段且已经提交当前地图节点后才会成功
+- 临时测试旁路：大厅全员 ready 进入 `SHOP` 后，可直接发送 `PLAYER_READY` 跳过商店和地图
+- 原地图流程仍可使用；进入 `MAP` 后，`PLAYER_READY` 仍要求已经提交当前地图节点
 - `PLAYER_READY` 未全员就绪时广播 `BATTLE_WAIT`
 - 全员就绪时立即触发一次首帧广播：
   - `type = 1`（`BattleResponseType::BATTLE_FRAME`）
   - `pushMessages = [0]`（`BattlePushMessageType::BATTLE_START`）
-  - 房间阶段从 `MAP` 推进到 `BATTLE`
+  - 房间阶段从 `SHOP` 或 `MAP` 推进到 `BATTLE`
 
 战斗帧同步：
 
@@ -165,7 +166,7 @@
 
 - 初始阶段为 `LOBBY`
 - `LOBBY`：允许建房、加入、离房、房间 ready；全员 ready 后进入 `SHOP`
-- `SHOP`：允许 `SHOP_INIT`、`SHOP_MOVE_CURSOR`、`SHOP_BUY`；首次合法 `MAP_INIT` 后进入 `MAP`
+- `SHOP`：允许 `SHOP_INIT`、`SHOP_MOVE_CURSOR`、`SHOP_BUY`；临时允许直接 `PLAYER_READY`；首次合法 `MAP_INIT` 后进入 `MAP`
 - `MAP`：允许 `MAP_INIT`、`MAP_MOVE`；全员提交同一个合法节点后，才允许战斗 ready
 - `BATTLE`：允许 `PLAYER_READY` 启动后的 `BATTLE_SYNC`、`PLAYER_SHOOT` 和服务端 tick；商店/地图/大厅 ready 等非战斗入口会返回房间状态错误
 - `END`：本轮流程结束；失败或最后节点胜利会进入该阶段
@@ -192,10 +193,10 @@
 
 战斗阶段：
 
-- `PLAYER_READY` 只在 `MAP` 阶段成功，且要求当前已提交地图节点
-- 全员 battle ready 后，服务端创建玩家实体、按当前地图节点类型生成敌人，并进入 `BATTLE`
+- `PLAYER_READY` 临时允许在 `SHOP` 阶段直接成功；在 `MAP` 阶段仍要求当前已提交地图节点
+- 全员 battle ready 后，服务端创建玩家实体；直达路径使用普通敌人池，地图路径按当前节点类型生成敌人
 - `BATTLE_SYNC`、`PLAYER_SHOOT`、`tick_battle()` 只在 `BATTLE` 阶段成功
-- 战斗胜利会清空战斗临时状态；若当前节点还有后继则回到 `MAP`，否则进入 `END`
+- 战斗胜利会清空战斗临时状态；直达路径进入 `END`，地图路径若当前节点还有后继则回到 `MAP`，否则进入 `END`
 - 玩家全灭按失败处理，清空战斗临时状态并进入 `END`
 
 ## 项目结构
@@ -294,7 +295,7 @@ ctest --test-dir build/debug-tests -R "^collision_detection_tests::" --output-on
   - `tests/network_tests/home_network_tests.cpp`：`CREATE_ROOM` / `LIST_ROOMS` / `JOIN_ROOM`
   - `tests/network_tests/shop_network_tests.cpp`：`SHOP_INIT` / `SHOP_MOVE_CURSOR`（异步推送）
   - `tests/network_tests/map_network_tests.cpp`：`MAP_INIT` / `MAP_MOVE`（异步推送）
-  - `tests/network_tests/battle_network_tests.cpp`：`LOBBY -> SHOP -> MAP -> PLAYER_READY` 后进入 `BATTLE_WAIT`/`BATTLE_FRAME`
+  - `tests/network_tests/battle_network_tests.cpp`：`LOBBY ready -> PLAYER_READY` 临时直达后进入 `BATTLE_WAIT`/`BATTLE_FRAME`
 
 构建：
 

@@ -123,8 +123,8 @@ static json first_enemy_frame(const std::shared_ptr<FakeClient> &client,
 TEST(BattleNetworkTest, BattleServer_SinglePlayerReadyBroadcastsStartFrame) {
   network_tests::MultiServiceHarness harness;
   const std::string uid = network_tests::auth_register_login(harness);
-  const int roomId = network_tests::lobby_create_room(harness, uid, 1);
-  network_tests::enter_map(harness, roomId, {uid});
+  network_tests::lobby_create_room(harness, uid, 1);
+  network_tests::lobby_ready(harness, uid);
 
   auto battle = harness.make_battle_client();
   battle->send_json(json{
@@ -160,7 +160,8 @@ TEST(BattleNetworkTest,
 
   const int roomId = network_tests::lobby_create_room(harness, alice, 2);
   network_tests::lobby_join_room(harness, roomId, bob);
-  network_tests::enter_map(harness, roomId, {alice, bob});
+  network_tests::lobby_ready(harness, alice);
+  network_tests::lobby_ready(harness, bob);
 
   auto battleAlice = harness.make_battle_client();
   auto battleBob = harness.make_battle_client();
@@ -172,6 +173,9 @@ TEST(BattleNetworkTest,
   const json waitPush = battleAlice->read_json();
   EXPECT_EQ(waitPush.at("type").get<int>(),
             static_cast<int>(Protocol::BattleResponseType::BATTLE_WAIT));
+  EXPECT_GT(waitPush.at("data").at("gameFrame").get<int>(), 0);
+  EXPECT_EQ(waitPush.at("data").at("readyCount").get<int>(), 1);
+  EXPECT_EQ(waitPush.at("data").at("totalCount").get<int>(), 2);
 
   battleBob->send_json(json{
       {"type", static_cast<int>(Protocol::BattleRequestType::PLAYER_READY)},
@@ -305,8 +309,8 @@ TEST(BattleNetworkTest, BattleServer_FrameCarriesEnemySpawnEvent) {
   network_tests::MultiServiceHarness harness;
   harness.get_state()->battleConfig = Battle::default_battle_config();
   const std::string uid = network_tests::auth_register_login(harness);
-  const int roomId = network_tests::lobby_create_room(harness, uid, 1);
-  network_tests::enter_map(harness, roomId, {uid});
+  network_tests::lobby_create_room(harness, uid, 1);
+  network_tests::lobby_ready(harness, uid);
 
   auto battle = harness.make_battle_client();
   battle->send_json(json{

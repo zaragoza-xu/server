@@ -451,7 +451,7 @@ TEST(RoomTest, ShopItemCountTracksCurrentMemberCount) {
   EXPECT_EQ(afterLeaveRsp.playerInfos.size(), 1U);
 }
 
-TEST(RoomTest, PhaseRejectsBattleReadyBeforeMapCommit) {
+TEST(RoomTest, PhaseAllowsBattleReadyDirectlyAfterLobbyReady) {
   auto harness = make_room();
 
   Protocol::BattleWaitRsp waitRsp;
@@ -459,10 +459,20 @@ TEST(RoomTest, PhaseRejectsBattleReadyBeforeMapCommit) {
   EXPECT_FALSE(harness.room->set_battle_ready(harness.uid, waitRsp, allReady));
 
   ASSERT_TRUE(harness.room->set_member_ready(harness.uid, true));
-  EXPECT_FALSE(harness.room->set_battle_ready(harness.uid, waitRsp, allReady));
+  EXPECT_TRUE(harness.room->set_battle_ready(harness.uid, waitRsp, allReady));
+  EXPECT_TRUE(allReady);
+}
+
+TEST(RoomTest, PhaseRejectsBattleReadyBeforeMapCommitAfterMapInit) {
+  auto harness = make_room();
+
+  ASSERT_TRUE(harness.room->set_member_ready(harness.uid, true));
 
   Protocol::MapInitRsp init;
   ASSERT_TRUE(harness.room->get_map_init(init));
+
+  Protocol::BattleWaitRsp waitRsp;
+  bool allReady = false;
   EXPECT_FALSE(harness.room->set_battle_ready(harness.uid, waitRsp, allReady));
 }
 

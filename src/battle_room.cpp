@@ -116,7 +116,8 @@ void Room::start_battle_locked() {
 }
 
 void Room::end_battle_locked(bool won) {
-  const bool runEnded = !won || is_last_map_node_locked();
+  // Direct test battles have no map node, so they end instead of returning MAP.
+  const bool runEnded = !won || mapNodeId < 0 || is_last_map_node_locked();
   reset_battle_state_locked();
   phase = runEnded ? Phase::END : Phase::MAP;
 }
@@ -124,7 +125,8 @@ void Room::end_battle_locked(bool won) {
 bool Room::set_battle_ready(const std::string &uid,
                             Protocol::BattleWaitRsp &rsp, bool &allReady) {
   std::lock_guard<std::mutex> lock(roomMutex);
-  if (phase != Phase::MAP || mapNodeId < 0) {
+  // Temporary test shortcut: SHOP may enter battle without selecting a map.
+  if (phase != Phase::SHOP && (phase != Phase::MAP || mapNodeId < 0)) {
     return false;
   }
   auto it = battleReadyStates.find(uid);

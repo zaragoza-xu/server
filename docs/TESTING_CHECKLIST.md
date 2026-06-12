@@ -104,7 +104,7 @@
 - `JOIN_ROOM` 只在 `LOBBY` 阶段成功；进入后续阶段后加入应返回 `ROOM_STATE_ERROR`。
 - `SET_READY` 只在 `LOBBY` 阶段成功。
 - 全员 `SET_READY=true` 后进入 `SHOP`，并广播 `ALL_READY`。
-- `SHOP` 阶段允许商店接口，不允许 `PLAYER_READY` 直接开战。
+- `SHOP` 阶段允许商店接口；临时测试旁路允许 `PLAYER_READY` 直接开战。
 - 首次合法 `MAP_INIT` 后进入 `MAP`。
 - `MAP` 阶段未提交节点时，`PLAYER_READY` 必须返回 `ROOM_STATE_ERROR`。
 - `MAP` 阶段提交节点后，`PLAYER_READY` 才能进入战斗准备流程。
@@ -135,7 +135,7 @@
 
 ### 4.4 战斗阶段
 
-- `PLAYER_READY` 只有在 `MAP` 阶段且已提交当前地图节点后才成功。
+- `PLAYER_READY` 临时允许在 `SHOP` 阶段直接成功；在 `MAP` 阶段仍要求已提交当前地图节点。
 - `PLAYER_READY` 未全员就绪时广播 `BATTLE_WAIT`。
 - 全员就绪时首个广播应为 `BATTLE_FRAME`，且 `pushMessages` 含 `BATTLE_START`。
 - `BATTLE_SYNC` 上报玩家位置和怪物位置；`BATTLE_FRAME` 只同步玩家实体和事件，不包含每帧怪物/子弹实体列表。
@@ -158,7 +158,7 @@
 
 - 真实 TCP 连接测试完整命令流
 - 覆盖 auth/lobby/shop/map/battle 五个端口
-- shop/map/battle 网络测试必须先走完整阶段前置流程，例如 `LOBBY ready -> SHOP -> MAP_INIT -> MAP_MOVE -> PLAYER_READY`
+- battle 网络测试覆盖临时直达流程 `LOBBY ready -> PLAYER_READY`；shop/map 网络测试继续覆盖原接口。
 
 ### 5.3 稳定性测试
 
