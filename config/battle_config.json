@@ -5,7 +5,7 @@
   "frameRate": 60,
   "durationSeconds": 180,
   "spawnIntervalSeconds": 0.5,
-  "baseSpawnBudget": 2,
+  "baseSpawnBudget": 0.5,
   "difficultyGrowth": 0.08,
   "maxCostFactor": 3,
   "spawnRadiusMin": 8,
@@ -82,7 +82,7 @@
     {
       "weaponId": "pistol_1",
       "weaponName": "pistol",
-      "damage": 12,
+      "damage": 30,
       "attackSpeed": 0.2,
       "range": 50000,
       "knockback": 15,
@@ -107,7 +107,7 @@
     {
       "weaponId": "pistol_2",
       "weaponName": "pistol",
-      "damage": 20,
+      "damage": 50,
       "attackSpeed": 0.2,
       "range": 50000,
       "knockback": 15,
@@ -132,7 +132,7 @@
     {
       "weaponId": "pistol_3",
       "weaponName": "pistol",
-      "damage": 30,
+      "damage": 70,
       "attackSpeed": 0.13,
       "range": 50000,
       "knockback": 15,
@@ -157,7 +157,7 @@
     {
       "weaponId": "pistol_4",
       "weaponName": "pistol",
-      "damage": 50,
+      "damage": 90,
       "attackSpeed": 0.1,
       "range": 50000,
       "knockback": 15,
