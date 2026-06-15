@@ -819,8 +819,32 @@ TEST(RoomTest, BattleBulletHitsEnemyMovementPath) {
 
   ASSERT_TRUE(harness.room->sync_battle(harness.uid, playerPos, {}));
   ASSERT_TRUE(harness.room->shoot_battle_player(harness.uid, {1.0, 0.0}));
-  ASSERT_TRUE(
-      harness.room->sync_battle(harness.uid, playerPos, {enemyReport}));
+  ASSERT_TRUE(harness.room->sync_battle(harness.uid, playerPos, {enemyReport}));
+  ASSERT_TRUE(harness.room->tick_battle(frame));
+
+  EXPECT_GE(
+      find_event(frame.events, Protocol::BattleEventType::BULLET_HIT_ENEMY), 0);
+  EXPECT_GE(find_damage_to(frame.events, Protocol::EntityType::ENEMY), 0);
+}
+
+TEST(RoomTest, BattleBulletCanHitEnemyInsidePlayerRadius) {
+  auto weapon = test_gun();
+  weapon.projectile.size = 0.05;
+  weapon.projectile.speed = 1.0;
+  auto harness = make_room_with_weapon(weapon, {test_enemy()});
+  harness.state->battleConfig.playerRadius = 1.0;
+  harness.state->battleConfig.enemyRadius = 0.2;
+  buy_and_select(*harness.room, harness.uid, "test_gun");
+
+  Protocol::BattleFrameRsp frame;
+  start_battle(*harness.room, harness.uid, frame);
+  const auto enemy = first_spawned_enemy(frame);
+  ASSERT_TRUE(enemy.has_value());
+
+  const Battle::BattleVector2 playerPos{enemy->position.x - 0.7,
+                                        enemy->position.y};
+  ASSERT_TRUE(harness.room->sync_battle(harness.uid, playerPos, {}));
+  ASSERT_TRUE(harness.room->shoot_battle_player(harness.uid, {1.0, 0.0}));
   ASSERT_TRUE(harness.room->tick_battle(frame));
 
   EXPECT_GE(

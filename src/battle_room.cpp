@@ -346,7 +346,9 @@ void Room::tick_bullets_locked() {
                                     : battleConfig.bulletRadius;
     const double hitRadius = bulletRadius + battleConfig.enemyRadius;
     const double hitDistanceSquared = hitRadius * hitRadius;
-    const BattleVector2 prevPosition = bullet.position;
+    const BattleVector2 prevPosition =
+        bulletState.checkedSpawnPath ? bullet.position : bulletState.spawnFrom;
+    bulletState.checkedSpawnPath = true;
 
     bullet.position.x += bullet.direction.x;
     bullet.position.y += bullet.direction.y;
@@ -562,6 +564,7 @@ bool Room::shoot_battle_player(const std::string &uid,
       bullet.direction = BattleVector2{attackDir.x * projectile.speed,
                                        attackDir.y * projectile.speed};
       bulletState.sourceUid = player->uid;
+      bulletState.spawnFrom = player->position;
       bulletState.damage = weapon_damage_locked(*weapon);
       bulletState.rangeLeft = battle_range(*weapon);
       bullet.attribute = bullet_attribute(projectile);
