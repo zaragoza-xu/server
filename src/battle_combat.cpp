@@ -230,6 +230,7 @@ void Room::spawn_enemies_locked(
     }
 
     battleEnemyStates.emplace(entityId, std::move(enemyState));
+    ++spawnedEnemyCount;
   }
 }
 

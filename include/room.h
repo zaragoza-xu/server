@@ -57,6 +57,7 @@ private:
   int battleTick = 0;
   int nextBattleEntityId = 1;
   int nextBattleSpawnTick = 0;
+  int spawnedEnemyCount = 0;
   double spawnBudget = 0.0;
   bool battleStarted = false;
   std::mt19937 battleRng;

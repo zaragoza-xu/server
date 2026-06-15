@@ -1122,33 +1122,26 @@ TEST(RoomTest, BattleSpawnBudgetCarriesAcrossIntervals) {
   EXPECT_EQ(spawned_enemies(frame).size(), 1U);
 }
 
-TEST(RoomTest, BattleWinsWhenTimeExpires) {
+TEST(RoomTest, BattleWinsAfterTargetEnemySpawnsAreCleared) {
   auto state = std::make_shared<ServerState>();
   state->battleConfig = default_battle_config();
   state->battleConfig.frameRate = 10;
-  state->battleConfig.durationSeconds = 0.2;
+  state->battleConfig.targetEnemySpawns = 1;
   state->battleConfig.baseSpawnBudget = 1.0;
+  state->battleConfig.spawnIntervalSeconds = 0.1;
+  state->battleConfig.weapons = {test_gun()};
   state->battleConfig.enemies = {
-      {BattleEnemyPool::NORMAL, Protocol::BattleEnemyType::BUBBLE_FISH, 10, 1.5,
-       1.0, 0.0, 4, 20, 100.0, 0.0, 100.0},
+      {BattleEnemyPool::NORMAL, Protocol::BattleEnemyType::BUBBLE_FISH, 1, 1.5,
+       0.0, 0.0, 0, 20, 1.0, 0.0, 100.0},
   };
+  state->shopCatalogItemIds = {"test_gun"};
 
   Protocol::PlayerBasicInfo creatorInfo{"1", "creator", 1};
   state->userData.emplace(creatorInfo.uid,
                           Protocol::PlayerData{.basicInfo = creatorInfo});
   auto creator = std::make_shared<User>(creatorInfo.uid, state);
   Room room(78, 1, state, creator);
-
-  ASSERT_TRUE(room.set_member_ready(creatorInfo.uid, true));
-  Protocol::MapInitRsp init;
-  ASSERT_TRUE(room.get_map_init(init));
-  ASSERT_FALSE(init.map.empty());
-
-  std::vector<Protocol::MapSync> selectStatus;
-  bool committed = false;
-  ASSERT_TRUE(room.move_map(creatorInfo.uid, init.map.front().nodeId,
-                            selectStatus, committed));
-  ASSERT_TRUE(committed);
+  buy_and_select(room, creatorInfo.uid, "test_gun");
 
   Protocol::BattleWaitRsp waitRsp;
   bool allReady = false;
@@ -1159,9 +1152,14 @@ TEST(RoomTest, BattleWinsWhenTimeExpires) {
   bool ended = false;
   ASSERT_TRUE(room.tick_battle(frame, &ended));
   EXPECT_FALSE(ended);
-  ASSERT_TRUE(room.tick_battle(frame, &ended));
-  EXPECT_FALSE(ended);
-  ASSERT_TRUE(room.tick_battle(frame, &ended));
+  const auto enemy = first_spawned_enemy(frame);
+  ASSERT_TRUE(enemy.has_value());
+
+  const auto shotDir = dir_to({0.0, 0.0}, enemy->position);
+  ASSERT_TRUE(room.shoot_battle_player(creatorInfo.uid, shotDir));
+  for (int tick = 0; tick < 30 && !ended; ++tick) {
+    ASSERT_TRUE(room.tick_battle(frame, &ended));
+  }
   EXPECT_TRUE(ended);
   EXPECT_FALSE(room.tick_battle(frame));
 }
