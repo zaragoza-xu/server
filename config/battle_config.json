@@ -4,7 +4,7 @@
   "playerRadius": 0.4,
   "frameRate": 60,
   "durationSeconds": 180,
-  "targetEnemySpawns": 30,
+  "targetEnemySpawns": 3,
   "spawnIntervalSeconds": 0.5,
   "baseSpawnBudget": 0.5,
   "difficultyGrowth": 0.08,
