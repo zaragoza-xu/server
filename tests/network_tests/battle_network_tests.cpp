@@ -223,7 +223,9 @@ TEST(BattleNetworkTest, BattleServer_PlayerShootBroadcastsSpawn) {
   battle->send_json(json{
       {"type", static_cast<int>(Protocol::BattleRequestType::PLAYER_SHOOT)},
       {"uid", uid},
-      {"direction", {{"x", 1.0}, {"y", 0.0}}}});
+      {"direction", {{"x", 1.0}, {"y", 0.0}}},
+      {"playerPosition", {{"x", 0.0}, {"y", 0.0}}},
+      {"enemyPositions", json::array()}});
   const json shootFrame = read_frame_until(battle, [](const json &frame) {
     return frame_has_event(frame, Protocol::BattleEventType::BULLET_SPAWN);
   });
@@ -272,10 +274,17 @@ TEST(BattleNetworkTest, BattleServer_PlayerBulletHitEnemyBroadcastsDamage) {
   const json enemy = first_spawned_enemy(startFrame);
   ASSERT_FALSE(enemy.is_null());
   const json shootDir = direction_to(enemy.at("position"));
+  const json enemyReport{
+      {"entityId", enemy.at("entityId").get<int>()},
+      {"position", enemy.at("position")},
+      {"direction", enemy.at("direction")},
+  };
   battle->send_json(json{
       {"type", static_cast<int>(Protocol::BattleRequestType::PLAYER_SHOOT)},
       {"uid", uid},
-      {"direction", shootDir}});
+      {"direction", shootDir},
+      {"playerPosition", {{"x", 0.0}, {"y", 0.0}}},
+      {"enemyPositions", json::array({enemyReport})}});
 
   const json hitFrame = read_frame_until(battle, [](const json &frame) {
     return frame_has_event(frame,

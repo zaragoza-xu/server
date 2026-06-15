@@ -151,7 +151,8 @@ int Server::battle_player_shoot(const Protocol::BattlePlayerShootReq &req,
     return resolveCode;
   }
 
-  if (!room->shoot_battle_player(req.uid, req.direction)) {
+  if (!room->shoot_battle_player(req.uid, req.direction, req.playerPosition,
+                                 req.enemyPositions)) {
     return Protocol::SERVICE_FAIL | Protocol::ROOM_STATE_ERROR;
   }
   return Protocol::SERVICE_SUCCESS;
