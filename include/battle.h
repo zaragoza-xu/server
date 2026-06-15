@@ -412,6 +412,7 @@ struct WeaponDef {
 
 struct EnemyState {
   Protocol::BattleEnemyEntity entity;
+  BattleVector2 lastPosition;
   double attackRange = 1.5;
   double maxSpeed = 1.0;
   int attackDamage = 4;
