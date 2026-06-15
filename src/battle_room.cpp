@@ -55,6 +55,7 @@ void Room::reset_battle_state_locked() {
   battleTick = 0;
   nextBattleEntityId = 1;
   nextBattleSpawnTick = 0;
+  spawnedEnemyCount = 0;
   spawnBudget = 0.0;
   battlePlayersByUid.clear();
   battleWeaponsByUid.clear();
@@ -244,6 +245,9 @@ void Room::tick_enemy_attacks_locked() {
 }
 
 void Room::tick_spawn_locked() {
+  if (spawnedEnemyCount >= battleConfig.targetEnemySpawns) {
+    return;
+  }
   if (battleTick < nextBattleSpawnTick) {
     return;
   }
@@ -262,6 +266,10 @@ void Room::tick_spawn_locked() {
 
   std::vector<Battle::EnemySpawnSpec> spawns;
   while (1) {
+    if (spawnedEnemyCount + static_cast<int>(spawns.size()) >=
+        battleConfig.targetEnemySpawns) {
+      break;
+    }
     auto picked = pick_enemy_locked(pool, spawnBudget);
     if (!picked.has_value()) {
       break;
@@ -367,8 +375,8 @@ bool Room::tick_battle(Protocol::BattleFrameRsp &frame, bool *ended) {
     return false;
   }
 
-  bool battleWon = battle_time_locked() >= battleConfig.durationSeconds;
-  bool battleEnded = battleWon;
+  bool battleWon = false;
+  bool battleEnded = false;
 
   if (!battleEnded) {
     apply_enemy_reports_locked();
@@ -402,6 +410,11 @@ bool Room::tick_battle(Protocol::BattleFrameRsp &frame, bool *ended) {
     if (all_players_dead_locked()) {
       battleEnded = true;
       battleWon = false;
+    }
+    if (!battleEnded && spawnedEnemyCount >= battleConfig.targetEnemySpawns &&
+        battleEnemyStates.empty()) {
+      battleEnded = true;
+      battleWon = true;
     }
   }
 
