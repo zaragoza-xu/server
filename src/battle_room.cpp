@@ -48,6 +48,56 @@ double segment_hit_t(const BattleVector2 &from, const BattleVector2 &to,
              ? t
              : std::numeric_limits<double>::infinity();
 }
+
+double segment_pair_hit_t(const BattleVector2 &a0, const BattleVector2 &a1,
+                          const BattleVector2 &b0, const BattleVector2 &b1,
+                          double radiusSquared) {
+  constexpr double eps = 1e-9;
+  const BattleVector2 u{a1.x - a0.x, a1.y - a0.y};
+  const BattleVector2 v{b1.x - b0.x, b1.y - b0.y};
+  const BattleVector2 w{a0.x - b0.x, a0.y - b0.y};
+  const double a = Battle::length_squared(u);
+  const double c = Battle::length_squared(v);
+
+  if (a <= eps && c <= eps) {
+    return Battle::distance_squared(a0, b0) <= radiusSquared
+               ? 0.0
+               : std::numeric_limits<double>::infinity();
+  }
+  if (c <= eps) {
+    return segment_hit_t(a0, a1, b0, radiusSquared);
+  }
+  if (a <= eps) {
+    const double t =
+        std::clamp(-((b0.x - a0.x) * v.x + (b0.y - a0.y) * v.y) / c, 0.0, 1.0);
+    const BattleVector2 closest{b0.x + v.x * t, b0.y + v.y * t};
+    return Battle::distance_squared(a0, closest) <= radiusSquared
+               ? 0.0
+               : std::numeric_limits<double>::infinity();
+  }
+
+  const double b = u.x * v.x + u.y * v.y;
+  const double d = u.x * w.x + u.y * w.y;
+  const double e = v.x * w.x + v.y * w.y;
+  const double denom = a * c - b * b;
+
+  double s = denom > eps ? std::clamp((b * e - c * d) / denom, 0.0, 1.0)
+                         : 0.0;
+  double t = (b * s + e) / c;
+  if (t < 0.0) {
+    t = 0.0;
+    s = std::clamp(-d / a, 0.0, 1.0);
+  } else if (t > 1.0) {
+    t = 1.0;
+    s = std::clamp((b - d) / a, 0.0, 1.0);
+  }
+
+  const BattleVector2 pointA{a0.x + u.x * s, a0.y + u.y * s};
+  const BattleVector2 pointB{b0.x + v.x * t, b0.y + v.y * t};
+  return Battle::distance_squared(pointA, pointB) <= radiusSquared
+             ? s
+             : std::numeric_limits<double>::infinity();
+}
 } // namespace
 
 void Room::reset_battle_state_locked() {
@@ -151,6 +201,7 @@ void Room::apply_enemy_reports_locked() {
   // Clients simulate enemy movement, but the server averages valid reports and
   // still enforces speed before accepting them.
   for (auto &[enemyId, enemyState] : battleEnemyStates) {
+    enemyState.lastPosition = enemyState.entity.position;
     double x = 0.0;
     double y = 0.0;
     double dx = 0.0;
@@ -293,7 +344,9 @@ void Room::tick_bullets_locked() {
                                     : battleConfig.bulletRadius;
     const double hitRadius = bulletRadius + battleConfig.enemyRadius;
     const double hitDistanceSquared = hitRadius * hitRadius;
-    const BattleVector2 prevPosition = bullet.position;
+    const BattleVector2 prevPosition =
+        bulletState.checkedSpawnPath ? bullet.position : bulletState.spawnFrom;
+    bulletState.checkedSpawnPath = true;
 
     bullet.position.x += bullet.direction.x;
     bullet.position.y += bullet.direction.y;
@@ -315,8 +368,9 @@ void Room::tick_bullets_locked() {
         continue;
       }
       const double candidateT =
-          segment_hit_t(prevPosition, bullet.position,
-                        it->second.entity.position, hitDistanceSquared);
+          segment_pair_hit_t(prevPosition, bullet.position,
+                             it->second.lastPosition, it->second.entity.position,
+                             hitDistanceSquared);
       if (std::isfinite(candidateT) && candidateT <= nearestHitT) {
         nearestHitT = candidateT;
         enemyIt = it;
@@ -508,6 +562,7 @@ bool Room::shoot_battle_player(const std::string &uid,
       bullet.direction = BattleVector2{attackDir.x * projectile.speed,
                                        attackDir.y * projectile.speed};
       bulletState.sourceUid = player->uid;
+      bulletState.spawnFrom = player->position;
       bulletState.damage = weapon_damage_locked(*weapon);
       bulletState.rangeLeft = battle_range(*weapon);
       bullet.attribute = bullet_attribute(projectile);

@@ -412,6 +412,7 @@ struct WeaponDef {
 
 struct EnemyState {
   Protocol::BattleEnemyEntity entity;
+  BattleVector2 lastPosition;
   double attackRange = 1.5;
   double maxSpeed = 1.0;
   int attackDamage = 4;
@@ -422,11 +423,13 @@ struct EnemyState {
 struct BulletState {
   Protocol::BattleBulletEntity entity;
   std::string sourceUid;
+  BattleVector2 spawnFrom;
   int damage = 5;
   int remainingPierce = 0;
   double pierceScale = 1.0;
   double pierceDamageFactor = 0.75;
   double rangeLeft = 0.0;
+  bool checkedSpawnPath = false;
   Battle::WeaponDef weapon;
   std::unordered_set<int> hitEnemyIds;
 };
