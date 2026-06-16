@@ -135,6 +135,22 @@ void Room::end_battle_locked(bool won) {
   phase = runEnded ? Phase::END : Phase::MAP;
 }
 
+void Room::set_enemy_reports_locked(
+    const std::string &uid,
+    const std::vector<Protocol::BattlePos> &enemyPositions) {
+  auto &enemyById = enemyPosByUid[uid];
+  enemyById.clear();
+  // Invalid enemy reports are dropped before the next tick.
+  for (const auto &enemyPosition : enemyPositions) {
+    if (!has_enemy_locked(enemyPosition.entityId) ||
+        !is_valid_vector(enemyPosition.position) ||
+        !is_valid_vector(enemyPosition.direction)) {
+      continue;
+    }
+    enemyById[enemyPosition.entityId] = enemyPosition;
+  }
+}
+
 bool Room::set_battle_ready(const std::string &uid,
                             Protocol::BattleWaitRsp &rsp, bool &allReady) {
   std::lock_guard<std::mutex> lock(roomMutex);
@@ -471,22 +487,14 @@ bool Room::sync_battle(const std::string &uid,
     player->position = playerPosition;
   }
 
-  auto &enemyById = enemyPosByUid[uid];
-  enemyById.clear();
-  // Invalid enemy reports are dropped before the next tick.
-  for (const auto &enemyPosition : enemyPositions) {
-    if (!has_enemy_locked(enemyPosition.entityId) ||
-        !is_valid_vector(enemyPosition.position) ||
-        !is_valid_vector(enemyPosition.direction)) {
-      continue;
-    }
-    enemyById[enemyPosition.entityId] = enemyPosition;
-  }
+  set_enemy_reports_locked(uid, enemyPositions);
   return true;
 }
 
-bool Room::shoot_battle_player(const std::string &uid,
-                               const BattleVector2 &direction) {
+bool Room::shoot_battle_player(
+    const std::string &uid, const BattleVector2 &direction,
+    const BattleVector2 &playerPosition,
+    const std::vector<Protocol::BattlePos> &enemyPositions) {
   std::lock_guard<std::mutex> lock(roomMutex);
   if (phase != Phase::BATTLE || !battleStarted) {
     return false;
@@ -494,9 +502,12 @@ bool Room::shoot_battle_player(const std::string &uid,
   auto *player = live_player_locked(uid);
   auto *weapon = equipped_weapon_locked(uid);
   if (player == nullptr || weapon == nullptr || !is_valid_vector(direction) ||
+      !is_valid_vector(playerPosition) ||
       Battle::length_squared(direction) <= 0.0) {
     return false;
   }
+  player->position = playerPosition;
+  set_enemy_reports_locked(uid, enemyPositions);
 
   auto cooldownIt = nextAttackTickByUid.find(uid);
   if (cooldownIt != nextAttackTickByUid.end() &&

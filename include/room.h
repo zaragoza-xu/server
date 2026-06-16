@@ -161,6 +161,9 @@ private:
                            const Battle::WeaponDef &weapon,
                            const Battle::BattleVector2 &direction);
   Protocol::BattlePlayerEntity *live_player_locked(const std::string &uid);
+  void set_enemy_reports_locked(
+      const std::string &uid,
+      const std::vector<Protocol::BattlePos> &enemyPositions);
   void apply_enemy_reports_locked();
   void tick_bullets_locked();
   void tick_enemy_attacks_locked();
@@ -197,8 +200,10 @@ public:
   bool sync_battle(const std::string &uid,
                    const Battle::BattleVector2 &playerPosition,
                    const std::vector<Protocol::BattlePos> &enemyPositions);
-  bool shoot_battle_player(const std::string &uid,
-                           const Battle::BattleVector2 &direction);
+  bool shoot_battle_player(
+      const std::string &uid, const Battle::BattleVector2 &direction,
+      const Battle::BattleVector2 &playerPosition,
+      const std::vector<Protocol::BattlePos> &enemyPositions);
   bool tick_battle(Protocol::BattleFrameRsp &frame, bool *ended = nullptr);
 
   bool set_member_ready(const std::string &uid, bool ready);

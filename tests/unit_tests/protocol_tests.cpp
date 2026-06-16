@@ -123,6 +123,29 @@ TEST(ProtocolTest, RequestResponseJsonRoundTrip) {
   EXPECT_EQ(parsedEdit.basicInfo.color, 7);
 }
 
+TEST(ProtocolTest, BattleShootReqRequiresSnapshots) {
+  json reqJson = {
+      {"type", static_cast<int>(Protocol::BattleRequestType::PLAYER_SHOOT)},
+      {"uid", "1001"},
+      {"direction", {{"x", 1.0}, {"y", 0.0}}},
+      {"playerPosition", {{"x", 2.0}, {"y", 3.0}}},
+      {"enemyPositions", json::array()}};
+  auto parsed = reqJson.get<Protocol::BattlePlayerShootReq>();
+  EXPECT_EQ(parsed.uid, "1001");
+  EXPECT_DOUBLE_EQ(parsed.playerPosition.x, 2.0);
+  EXPECT_TRUE(parsed.enemyPositions.empty());
+
+  json missingPlayer = reqJson;
+  missingPlayer.erase("playerPosition");
+  EXPECT_THROW(missingPlayer.get<Protocol::BattlePlayerShootReq>(),
+               json::out_of_range);
+
+  json missingEnemies = reqJson;
+  missingEnemies.erase("enemyPositions");
+  EXPECT_THROW(missingEnemies.get<Protocol::BattlePlayerShootReq>(),
+               json::out_of_range);
+}
+
 TEST(ProtocolTest, BattleFrameJsonOmitsDurableEnemyAndBulletLists) {
   Protocol::BattleFrameRsp frame;
   frame.serverTick = 7;
