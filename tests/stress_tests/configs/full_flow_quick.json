@@ -1,0 +1,22 @@
+{
+  "name": "full_flow",
+  "description": "Quick smoke: auth through battle flow.",
+  "targets": {
+    "auth": { "host": "127.0.0.1", "port": 8765 },
+    "lobby": { "host": "127.0.0.1", "port": 8766 },
+    "map": { "host": "127.0.0.1", "port": 8768 },
+    "battle": { "host": "127.0.0.1", "port": 8769 }
+  },
+  "duration_seconds": 30,
+  "concurrency": 4,
+  "battle_sync_count": 2,
+  "sync_interval_ms": 50,
+  "threads": 2,
+  "timeout_seconds": 15.0,
+  "thresholds": {
+    "max_unexpected_error_rate": 0.05,
+    "min_flow_success_rate": 0.50,
+    "max_p99_latency_ms": 1000.0,
+    "max_connect_failures": 5
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "battle_sync",
+  "description": "Quick smoke: 2 rooms x 2 players battle sync.",
+  "targets": {
+    "auth": { "host": "127.0.0.1", "port": 8765 },
+    "lobby": { "host": "127.0.0.1", "port": 8766 },
+    "map": { "host": "127.0.0.1", "port": 8768 },
+    "battle": { "host": "127.0.0.1", "port": 8769 }
+  },
+  "duration_seconds": 20,
+  "rooms": 2,
+  "players_per_room": 2,
+  "sync_interval_ms": 50,
+  "concurrency": 4,
+  "threads": 2,
+  "timeout_seconds": 15.0,
+  "thresholds": {
+    "max_unexpected_error_rate": 0.05,
+    "max_p99_latency_ms": 800.0,
+    "max_connect_failures": 5
+  }
+}

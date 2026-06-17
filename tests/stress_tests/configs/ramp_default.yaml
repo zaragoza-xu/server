@@ -1,0 +1,10 @@
+# Default ramp profile for stress testing.
+warmup_seconds: 30
+steps:
+  - { concurrency: 10, hold_seconds: 30 }
+  - { concurrency: 25, hold_seconds: 30 }
+  - { concurrency: 50, hold_seconds: 30 }
+  - { concurrency: 100, hold_seconds: 30 }
+recovery:
+  - { concurrency: 50, hold_seconds: 20 }
+  - { concurrency: 10, hold_seconds: 20 }

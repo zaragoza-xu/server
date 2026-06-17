@@ -1,0 +1,6 @@
+FROM ubuntu:22.04
+RUN apt-get update && apt-get install -y python3 iproute2 iptables bash && rm -rf /var/lib/apt/lists/*
+WORKDIR /workspace
+COPY tests/stress_tests /workspace/tests/stress_tests
+ENV PYTHONPATH=/workspace/tests/stress_tests
+CMD ["python3", "tests/stress_tests/run_stress.py", "--help"]

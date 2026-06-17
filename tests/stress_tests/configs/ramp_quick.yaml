@@ -1,0 +1,8 @@
+warmup_seconds: 10
+steps:
+  - { concurrency: 5, hold_seconds: 10 }
+  - { concurrency: 10, hold_seconds: 10 }
+  - { concurrency: 20, hold_seconds: 10 }
+recovery:
+  - { concurrency: 10, hold_seconds: 10 }
+  - { concurrency: 5, hold_seconds: 10 }
