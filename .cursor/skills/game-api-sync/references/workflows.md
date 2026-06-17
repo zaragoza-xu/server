@@ -1,12 +1,14 @@
-# 四种入口（v2）
+# 五种入口（v2）
 
 | 入口 | 触发 | ECS |
 |------|------|-----|
 | 刷新缓存 | IDE 主动（对齐/对比/写回前先调，当前模块；**默认 revision 比对**） | `POST /jobs/refresh-cache` |
 | 对比 | IDE 主动，只读 | `POST /jobs/api-compare` |
 | 对齐代码 | IDE 主动 | refresh → `GET /api/snapshot` + 改现有文件 |
-| 写回文档 | IDE 主动 / CI PR 合并 | `POST /jobs/api-doc-sync` |
-| CI 自动 | PR **合并**时（任意目标分支） | `scripts/ci/run_sync_job.py`（仅 sync，无 compare 报告） |
+| 写回协议文档 | IDE 主动 / CI PR 合并 | `POST /jobs/api-doc-sync` |
+| **模块系统设计文档** | **CI PR 合并** | `POST /jobs/module-system-doc-sync` |
+| CI 协议 sync | PR **合并**时 | `scripts/ci/run_sync_job.py` |
+| CI 系统设计 sync | PR **合并**时 | `scripts/ci/run_system_doc_job.py` |
 
 ## refresh-cache Body
 
@@ -59,3 +61,22 @@ Agent **须先**运行 `scripts/agent_doc_draft.py`（见 SKILL「同步文档�
 `summary` 与 `docx_draft` 至少其一。分流规则与 CI 相同：**struct/class → api_docs**，**enum/interface → type_constraints**（`sync_targets_for_module`）。
 
 **写文档格式**（CLI 兜底）：见 `doc-write-format.md`。glob 见 `registry-globs.md`。
+
+## module-system-doc-sync Body
+
+CI `run_system_doc_job.py` 组装并 POST：
+
+```json
+{
+  "module": "战斗",
+  "repo": "client",
+  "mode": "full",
+  "files_changed": ["Assets/Scripts/Battle/Foo.cs"],
+  "docx_draft": "<h1>战斗模块（CI生成，待审查）</h1>..."
+}
+```
+
+- `mode`：`full`（无 `system_design_obj` 时建 wiki 子页 + 全文）或 `delta`（仅 append 变更段）
+- ECS 使用 **creator** lark-cli profile（`MODULE_DOC_LARK_CLI_HOME`，默认 `/opt/api-sync/.lark-creator`）
+- **LLM 默认开启**：`MODULE_DOC_USE_AGENT=true`（设 `false` 关闭），`MODULE_DOC_AGENT_BACKEND=cursor`，需 `CURSOR_API_KEY`
+- 首次 `full` 响应含 `action_required`：人工写回 `modules.<名>.system_design_obj`

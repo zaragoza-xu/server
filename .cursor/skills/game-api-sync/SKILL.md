@@ -2,7 +2,7 @@
 name: game-api-sync
 description: >-
   飞书权威接口文档与 ECS 快照：刷新缓存、对比文档与代码差异、对齐协议代码、写回飞书正文草稿（标题标记待审查）。
-  在 client/server 仓库处理协议对齐、api-sync、wiki-registry、glob 路径维护或用户提到飞书接口文档时使用。
+  在 client/server 仓库处理协议对齐、api-sync、wiki-registry、glob 路径维护、模块系统设计文档或用户提到飞书接口文档时使用。
 ---
 
 # game-api-sync
@@ -90,6 +90,22 @@ python <中央仓>/scripts/agent_doc_draft.py `
 
 4. 对每个未 `skipped` 的 draft：`POST /jobs/api-doc-sync`（Body 用 `api_doc_sync_body`）；或加 `--sync` 由 CLI 一并 POST。
 5. 回复：`user_action_required`（若有）、各 target 的 classification、**docx_draft** 摘要；说明审阅后去掉「（agent生成，待审查）」即可。
+
+### 模块系统设计文档（PR merge · CI 写飞书）
+
+PR 合并后 GitHub Actions 自动将**变更差量**写入飞书「模块系统设计」wiki（父节点见 `wiki-registry.yaml` → `roots.system_design`）。使用 **ModuleDocBot / 创建者** lark-cli profile（`MODULE_DOC_LARK_CLI_HOME`），与协议 sync 的 GameBot **隔离**。
+
+- 触发：与 `sync-feishu-api-docs.yml` 相同（`pull_request.merged` + 协议路径）
+- CI：`run_system_doc_job.py` → `POST /jobs/module-system-doc-sync`
+- **新模块**（无 `system_design_obj`）：创建 wiki 子文档 + 写概览/架构/接口全文
+- **已有模块**：仅 append 变更段（接口无序列表 + 功能说明）
+- 首次创建后 Actions log 含 `action_required`：将 `system_design_obj` 写入 `wiki-registry.yaml`
+
+本地预览（不写飞书）：
+
+```powershell
+python <中央仓>/scripts/build_system_doc.py --module 战斗 --repo client --paths Assets/Scripts/Battle/Foo.cs
+```
 
 **禁止**默认跳过 CLI 手写 DocxXML。格式细节见 `references/doc-write-format.md`（兜底）。
 

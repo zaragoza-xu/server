@@ -91,6 +91,14 @@ python <中央仓>/scripts/agent_doc_draft.py `
 4. 对每个未 `skipped` 的 draft：`POST /jobs/api-doc-sync`（Body 用 `api_doc_sync_body`）；或加 `--sync` 由 CLI 一并 POST。
 5. 回复：`user_action_required`（若有）、各 target 的 classification、**docx_draft** 摘要；说明审阅后去掉「（agent生成，待审查）」即可。
 
+### 模块系统设计文档（PR merge · CI 写飞书）
+
+PR 合并后 GitHub Actions 自动将**变更差量**写入飞书「模块系统设计」wiki。使用 **ModuleDocBot / 创建者** profile（`MODULE_DOC_LARK_CLI_HOME`），与协议 sync 的 GameBot **隔离**。
+
+- CI：`run_system_doc_job.py` → `POST /jobs/module-system-doc-sync`
+- 新模块无 `system_design_obj` 时建 wiki 子页；已有模块仅 append 变更段
+- 首次创建后需人工写回 `system_design_obj` 到 `wiki-registry.yaml`
+
 **禁止**默认跳过 CLI 手写 DocxXML。格式细节见 `references/doc-write-format.md`（兜底）。
 
 ### 禁止

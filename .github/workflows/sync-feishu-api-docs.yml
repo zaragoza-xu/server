@@ -1,3 +1,7 @@
+# 复制到 server 游戏仓：.github/workflows/sync-feishu-api-docs.yml
+# 前置：Settings → Secrets → Actions 配置 API_SYNC_TOKEN
+# 仅在 PR 合并时 sync（任意目标分支）；PR 阶段不跑 compare、不出报告
+
 name: Sync Feishu API Docs (server)
 
 on:
@@ -13,6 +17,16 @@ jobs:
   sync:
     if: github.event.pull_request.merged == true
     uses: Pluto599/game-api-sync/.github/workflows/api-doc-sync-reusable.yml@main
+    secrets:
+      API_SYNC_TOKEN: ${{ secrets.API_SYNC_TOKEN }}
+    with:
+      game_repo: server
+      base_ref: ${{ github.event.pull_request.base.sha }}
+      merge_commit_sha: ${{ github.event.pull_request.merge_commit_sha }}
+
+  module-system-doc:
+    if: github.event.pull_request.merged == true
+    uses: Pluto599/game-api-sync/.github/workflows/module-system-doc-reusable.yml@main
     secrets:
       API_SYNC_TOKEN: ${{ secrets.API_SYNC_TOKEN }}
     with:
