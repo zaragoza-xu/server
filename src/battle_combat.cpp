@@ -209,6 +209,7 @@ void Room::spawn_enemies_locked(
     enemyState.entity.entityType = Protocol::EntityType::ENEMY;
     enemyState.entity.enemyType = spec.enemyType;
     enemyState.entity.position = spec.position;
+    enemyState.lastPosition = spec.position;
     enemyState.entity.direction = Battle::BattleVector2{0.0, 0.0};
     enemyState.entity.attribute.maxHP = spec.maxHP;
     enemyState.entity.attribute.currentHP = spec.maxHP;
@@ -230,6 +231,7 @@ void Room::spawn_enemies_locked(
     }
 
     battleEnemyStates.emplace(entityId, std::move(enemyState));
+    ++spawnedEnemyCount;
   }
 }
 

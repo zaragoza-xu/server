@@ -4,6 +4,7 @@
   "playerRadius": 0.4,
   "frameRate": 60,
   "durationSeconds": 180,
+  "targetEnemySpawns": 3,
   "spawnIntervalSeconds": 0.5,
   "baseSpawnBudget": 0.5,
   "difficultyGrowth": 0.08,
@@ -184,7 +185,7 @@
     {
       "pool": "normal",
       "enemyType": "BUBBLE_FISH",
-      "maxHP": 10,
+      "maxHP": 6,
       "attackRange": 1.5,
       "maxSpeed": 1,
       "knockbackResist": 0,
@@ -197,7 +198,7 @@
     {
       "pool": "normal",
       "enemyType": "BUBBLE_FISH",
-      "maxHP": 16,
+      "maxHP": 10,
       "attackRange": 1.6,
       "maxSpeed": 1.15,
       "knockbackResist": 0.05,
@@ -210,7 +211,7 @@
     {
       "pool": "elite",
       "enemyType": "BUBBLE_FISH",
-      "maxHP": 18,
+      "maxHP": 12,
       "attackRange": 1.7,
       "maxSpeed": 1.1,
       "knockbackResist": 0.1,
@@ -223,7 +224,7 @@
     {
       "pool": "elite",
       "enemyType": "BUBBLE_FISH",
-      "maxHP": 28,
+      "maxHP": 18,
       "attackRange": 1.9,
       "maxSpeed": 1.25,
       "knockbackResist": 0.15,
@@ -236,7 +237,7 @@
     {
       "pool": "boss",
       "enemyType": "BUBBLE_FISH",
-      "maxHP": 36,
+      "maxHP": 24,
       "attackRange": 2,
       "maxSpeed": 1,
       "knockbackResist": 0.25,
@@ -249,7 +250,7 @@
     {
       "pool": "boss",
       "enemyType": "BUBBLE_FISH",
-      "maxHP": 60,
+      "maxHP": 40,
       "attackRange": 2.2,
       "maxSpeed": 1.2,
       "knockbackResist": 0.35,

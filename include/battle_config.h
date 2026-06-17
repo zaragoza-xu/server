@@ -29,6 +29,7 @@ struct BattleConfig {
   double playerRadius = 0.4;
   int frameRate = 60;
   double durationSeconds = 180.0;
+  int targetEnemySpawns = 30;
   double spawnIntervalSeconds = 0.5;
   double baseSpawnBudget = 4.0;
   double difficultyGrowth = 0.08;

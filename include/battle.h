@@ -177,9 +177,23 @@ struct BattlePlayerShootReq {
   BattleRequestType type;
   std::string uid;
   BattleVector2 direction;
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(BattlePlayerShootReq, type, uid,
-                                              direction)
+  BattleVector2 playerPosition;
+  std::vector<BattlePos> enemyPositions;
 };
+inline void to_json(json &j, const BattlePlayerShootReq &req) {
+  j = json{{"type", req.type},
+           {"uid", req.uid},
+           {"direction", req.direction},
+           {"playerPosition", req.playerPosition},
+           {"enemyPositions", req.enemyPositions}};
+}
+inline void from_json(const json &j, BattlePlayerShootReq &req) {
+  j.at("type").get_to(req.type);
+  j.at("uid").get_to(req.uid);
+  j.at("direction").get_to(req.direction);
+  j.at("playerPosition").get_to(req.playerPosition);
+  j.at("enemyPositions").get_to(req.enemyPositions);
+}
 
 // Only the parameter matching eventType should be populated.
 struct BattleEventDTO {
@@ -412,6 +426,7 @@ struct WeaponDef {
 
 struct EnemyState {
   Protocol::BattleEnemyEntity entity;
+  BattleVector2 lastPosition;
   double attackRange = 1.5;
   double maxSpeed = 1.0;
   int attackDamage = 4;

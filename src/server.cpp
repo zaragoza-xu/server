@@ -155,9 +155,9 @@ void read_bool(const json &j, const char *key, bool &target) {
 bool valid_battle_config(const BattleConfig &cfg) {
   return cfg.playerMaxHP > 0 && cfg.playerSpeed >= 0.0 &&
          cfg.playerRadius >= 0.0 && cfg.frameRate > 0 &&
-         cfg.durationSeconds > 0.0 && cfg.spawnIntervalSeconds > 0.0 &&
-         cfg.baseSpawnBudget > 0.0 && cfg.maxCostFactor > 0.0 &&
-         cfg.spawnRadiusMin >= 0.0 &&
+         cfg.durationSeconds > 0.0 && cfg.targetEnemySpawns > 0 &&
+         cfg.spawnIntervalSeconds > 0.0 && cfg.baseSpawnBudget > 0.0 &&
+         cfg.maxCostFactor > 0.0 && cfg.spawnRadiusMin >= 0.0 &&
          cfg.spawnRadiusMax >= cfg.spawnRadiusMin && cfg.bulletSpeed > 0.0 &&
          cfg.bulletDamage > 0 && cfg.bulletRadius >= 0.0 &&
          cfg.enemyRadius >= 0.0 && battle_config_complete(cfg);
@@ -254,6 +254,7 @@ BattleConfig load_battle_config() {
       read_num(j, "playerRadius", cfg.playerRadius);
       read_num(j, "frameRate", cfg.frameRate);
       read_num(j, "durationSeconds", cfg.durationSeconds);
+      read_num(j, "targetEnemySpawns", cfg.targetEnemySpawns);
       read_num(j, "spawnIntervalSeconds", cfg.spawnIntervalSeconds);
       read_num(j, "baseSpawnBudget", cfg.baseSpawnBudget);
       read_num(j, "difficultyGrowth", cfg.difficultyGrowth);

@@ -11,6 +11,9 @@
 using Battle::BattleVector2;
 
 namespace {
+constexpr double kClientSyncRate = 20.0;
+constexpr double kMinHitForgiveness = 0.2;
+
 bool is_valid_vector(const BattleVector2 &value) {
   return std::isfinite(value.x) && std::isfinite(value.y);
 }
@@ -29,22 +32,31 @@ double enemy_range(const Battle::BattleConfig &cfg,
   return enemyState.attackRange + cfg.enemyRadius + player_radius(cfg);
 }
 
-double segment_hit_t(const BattleVector2 &from, const BattleVector2 &to,
-                     const BattleVector2 &target, double radiusSquared) {
-  const BattleVector2 delta{to.x - from.x, to.y - from.y};
-  const double lenSquared = Battle::length_squared(delta);
-  if (lenSquared <= 0.0) {
-    return Battle::distance_squared(from, target) <= radiusSquared
-               ? 0.0
-               : std::numeric_limits<double>::infinity();
-  }
+double hit_forgiveness(const Battle::BattleConfig &cfg,
+                       const Battle::EnemyState &enemyState) {
+  const double frameRate = std::max(1, cfg.frameRate);
+  const double driftTicks = std::ceil(frameRate / kClientSyncRate) + 1.0;
+  const double drift =
+      (enemyState.maxSpeed + cfg.playerSpeed) * driftTicks / frameRate;
+  return std::max(kMinHitForgiveness, drift);
+}
 
-  const BattleVector2 toTarget{target.x - from.x, target.y - from.y};
+double moving_hit_t(const BattleVector2 &a0, const BattleVector2 &a1,
+                    const BattleVector2 &b0, const BattleVector2 &b1,
+                    double radiusSquared) {
+  constexpr double eps = 1e-9;
+  const BattleVector2 u{a1.x - a0.x, a1.y - a0.y};
+  const BattleVector2 v{b1.x - b0.x, b1.y - b0.y};
+  const BattleVector2 w{a0.x - b0.x, a0.y - b0.y};
+  const BattleVector2 relative{u.x - v.x, u.y - v.y};
+  const double lenSquared = Battle::length_squared(relative);
   const double t =
-      std::clamp((toTarget.x * delta.x + toTarget.y * delta.y) / lenSquared,
-                 0.0, 1.0);
-  const BattleVector2 closest{from.x + delta.x * t, from.y + delta.y * t};
-  return Battle::distance_squared(closest, target) <= radiusSquared
+      lenSquared <= eps
+          ? 0.0
+          : std::clamp(-((w.x * relative.x + w.y * relative.y) / lenSquared),
+                       0.0, 1.0);
+  const BattleVector2 closest{w.x + relative.x * t, w.y + relative.y * t};
+  return Battle::length_squared(closest) <= radiusSquared
              ? t
              : std::numeric_limits<double>::infinity();
 }
@@ -55,6 +67,7 @@ void Room::reset_battle_state_locked() {
   battleTick = 0;
   nextBattleEntityId = 1;
   nextBattleSpawnTick = 0;
+  spawnedEnemyCount = 0;
   spawnBudget = 0.0;
   battlePlayersByUid.clear();
   battleWeaponsByUid.clear();
@@ -62,6 +75,7 @@ void Room::reset_battle_state_locked() {
   enemyPosByUid.clear();
   nextAttackTickByUid.clear();
   battleBullets.clear();
+  pendingShots.clear();
   pendingBattleEvents.clear();
   for (const auto &uid : uids) {
     battleReadyStates[uid] = false;
@@ -121,6 +135,22 @@ void Room::end_battle_locked(bool won) {
   phase = runEnded ? Phase::END : Phase::MAP;
 }
 
+void Room::set_enemy_reports_locked(
+    const std::string &uid,
+    const std::vector<Protocol::BattlePos> &enemyPositions) {
+  auto &enemyById = enemyPosByUid[uid];
+  enemyById.clear();
+  // Invalid enemy reports are dropped before the next tick.
+  for (const auto &enemyPosition : enemyPositions) {
+    if (!has_enemy_locked(enemyPosition.entityId) ||
+        !is_valid_vector(enemyPosition.position) ||
+        !is_valid_vector(enemyPosition.direction)) {
+      continue;
+    }
+    enemyById[enemyPosition.entityId] = enemyPosition;
+  }
+}
+
 bool Room::set_battle_ready(const std::string &uid,
                             Protocol::BattleWaitRsp &rsp, bool &allReady) {
   std::lock_guard<std::mutex> lock(roomMutex);
@@ -147,9 +177,11 @@ bool Room::set_battle_ready(const std::string &uid,
 }
 
 void Room::apply_enemy_reports_locked() {
-  // Clients simulate enemy movement, but the server averages valid reports and
-  // still enforces speed before accepting them.
+  // Clients simulate enemy movement and collisions. Valid reports are accepted
+  // as the enemy position for this frame; no-report enemies use server
+  // fallback.
   for (auto &[enemyId, enemyState] : battleEnemyStates) {
+    enemyState.lastPosition = enemyState.entity.position;
     double x = 0.0;
     double y = 0.0;
     double dx = 0.0;
@@ -196,8 +228,7 @@ void Room::apply_enemy_reports_locked() {
 
     const auto oldPosition = enemyState.entity.position;
     const BattleVector2 target{x / count, y / count};
-    enemyState.entity.position =
-        step_to(oldPosition, target, enemy_step(enemyState));
+    enemyState.entity.position = target;
     const auto movement =
         Battle::norm_or_zero({enemyState.entity.position.x - oldPosition.x,
                               enemyState.entity.position.y - oldPosition.y});
@@ -208,6 +239,55 @@ void Room::apply_enemy_reports_locked() {
   }
 
   enemyPosByUid.clear();
+}
+
+void Room::fire_pending_locked() {
+  auto shots = std::move(pendingShots);
+  pendingShots.clear();
+
+  for (const auto &shot : shots) {
+    auto *player = live_player_locked(shot.uid);
+    if (player == nullptr || Battle::length_squared(shot.direction) <= 0.0 ||
+        !is_valid_vector(shot.direction) ||
+        !is_valid_vector(shot.playerPosition)) {
+      continue;
+    }
+
+    const auto attackDir = Battle::norm_or_zero(shot.direction);
+    if (shot.weapon.projectileCount == 0) {
+      const auto currentPosition = player->position;
+      player->position = shot.playerPosition;
+      melee_attack_locked(*player, shot.weapon, attackDir);
+      player->position = currentPosition;
+      continue;
+    }
+
+    for (int index = 0; index < shot.weapon.projectileCount; ++index) {
+      Battle::BulletState bulletState;
+      auto &bullet = bulletState.entity;
+      bullet.entityId = nextBattleEntityId++;
+      bullet.entityType = Protocol::EntityType::PLAYER_BULLET;
+      bullet.position = shot.playerPosition;
+      bullet.type = Protocol::BattleBulletType::PLAYER_BULLET;
+      auto projectile = shot.weapon.projectile;
+      if (projectile.speed <= 0.0) {
+        projectile.speed = battleConfig.bulletSpeed;
+      }
+      bullet.direction = BattleVector2{attackDir.x * projectile.speed,
+                                       attackDir.y * projectile.speed};
+      bulletState.sourceUid = player->uid;
+      bulletState.damage = weapon_damage_locked(shot.weapon);
+      bulletState.rangeLeft = battle_range(shot.weapon);
+      bullet.attribute = bullet_attribute(projectile);
+      bulletState.weapon = shot.weapon;
+      bulletState.remainingPierce =
+          projectile.canPierce ? projectile.pierceCount : 0;
+      bulletState.pierceDamageFactor = projectile.pierceDamageFactor;
+      battleBullets.push_back(bulletState);
+
+      push_event_locked(EventType::BULLET_SPAWN, SpawnParam(bullet));
+    }
+  }
 }
 
 void Room::tick_enemy_attacks_locked() {
@@ -244,6 +324,9 @@ void Room::tick_enemy_attacks_locked() {
 }
 
 void Room::tick_spawn_locked() {
+  if (spawnedEnemyCount >= battleConfig.targetEnemySpawns) {
+    return;
+  }
   if (battleTick < nextBattleSpawnTick) {
     return;
   }
@@ -262,6 +345,10 @@ void Room::tick_spawn_locked() {
 
   std::vector<Battle::EnemySpawnSpec> spawns;
   while (1) {
+    if (spawnedEnemyCount + static_cast<int>(spawns.size()) >=
+        battleConfig.targetEnemySpawns) {
+      break;
+    }
     auto picked = pick_enemy_locked(pool, spawnBudget);
     if (!picked.has_value()) {
       break;
@@ -283,8 +370,6 @@ void Room::tick_bullets_locked() {
     const double bulletRadius = bullet.attribute.size > 0.0
                                     ? bullet.attribute.size
                                     : battleConfig.bulletRadius;
-    const double hitRadius = bulletRadius + battleConfig.enemyRadius;
-    const double hitDistanceSquared = hitRadius * hitRadius;
     const BattleVector2 prevPosition = bullet.position;
 
     bullet.position.x += bullet.direction.x;
@@ -306,21 +391,26 @@ void Room::tick_bullets_locked() {
       if (bulletState.hitEnemyIds.count(it->first) > 0) {
         continue;
       }
+      const double hitRadius = bulletRadius + battleConfig.enemyRadius +
+                               hit_forgiveness(battleConfig, it->second);
+      const double hitDistanceSquared = hitRadius * hitRadius;
       const double candidateT =
-          segment_hit_t(prevPosition, bullet.position,
-                        it->second.entity.position, hitDistanceSquared);
+          moving_hit_t(prevPosition, bullet.position, it->second.lastPosition,
+                       it->second.entity.position, hitDistanceSquared);
       if (std::isfinite(candidateT) && candidateT <= nearestHitT) {
         nearestHitT = candidateT;
         enemyIt = it;
       }
     }
-
     if (enemyIt == battleEnemyStates.end()) {
       liveBullets.push_back(std::move(bulletState));
       continue;
     }
 
     auto &enemy = enemyIt->second.entity;
+    const BattleVector2 hitPosition{
+        prevPosition.x + (bullet.position.x - prevPosition.x) * nearestHitT,
+        prevPosition.y + (bullet.position.y - prevPosition.y) * nearestHitT};
     const int damage =
         std::max(1, static_cast<int>(std::round(bulletState.damage *
                                                 bulletState.pierceScale)));
@@ -332,8 +422,8 @@ void Room::tick_bullets_locked() {
       continue;
     }
     hit_enemy_locked(enemy, bullet.entityId, EntityType::PLAYER_BULLET,
-                     sourceIt->second, bullet.position, bulletState.weapon,
-                     damage, EventType::BULLET_HIT_ENEMY);
+                     sourceIt->second, hitPosition, bulletState.weapon, damage,
+                     EventType::BULLET_HIT_ENEMY);
 
     const bool dead = enemy.attribute.currentHP <= 0;
     const bool canPierce = bulletState.remainingPierce > 0;
@@ -367,11 +457,12 @@ bool Room::tick_battle(Protocol::BattleFrameRsp &frame, bool *ended) {
     return false;
   }
 
-  bool battleWon = battle_time_locked() >= battleConfig.durationSeconds;
-  bool battleEnded = battleWon;
+  bool battleWon = false;
+  bool battleEnded = false;
 
   if (!battleEnded) {
     apply_enemy_reports_locked();
+    fire_pending_locked();
     tick_bullets_locked();
     tick_spawn_locked();
 
@@ -402,6 +493,11 @@ bool Room::tick_battle(Protocol::BattleFrameRsp &frame, bool *ended) {
     if (all_players_dead_locked()) {
       battleEnded = true;
       battleWon = false;
+    }
+    if (!battleEnded && spawnedEnemyCount >= battleConfig.targetEnemySpawns &&
+        battleEnemyStates.empty()) {
+      battleEnded = true;
+      battleWon = true;
     }
   }
 
@@ -437,22 +533,14 @@ bool Room::sync_battle(const std::string &uid,
     player->position = playerPosition;
   }
 
-  auto &enemyById = enemyPosByUid[uid];
-  enemyById.clear();
-  // Invalid enemy reports are dropped before the next tick.
-  for (const auto &enemyPosition : enemyPositions) {
-    if (!has_enemy_locked(enemyPosition.entityId) ||
-        !is_valid_vector(enemyPosition.position) ||
-        !is_valid_vector(enemyPosition.direction)) {
-      continue;
-    }
-    enemyById[enemyPosition.entityId] = enemyPosition;
-  }
+  set_enemy_reports_locked(uid, enemyPositions);
   return true;
 }
 
-bool Room::shoot_battle_player(const std::string &uid,
-                               const BattleVector2 &direction) {
+bool Room::shoot_battle_player(
+    const std::string &uid, const BattleVector2 &direction,
+    const BattleVector2 &playerPosition,
+    const std::vector<Protocol::BattlePos> &enemyPositions) {
   std::lock_guard<std::mutex> lock(roomMutex);
   if (phase != Phase::BATTLE || !battleStarted) {
     return false;
@@ -460,9 +548,12 @@ bool Room::shoot_battle_player(const std::string &uid,
   auto *player = live_player_locked(uid);
   auto *weapon = equipped_weapon_locked(uid);
   if (player == nullptr || weapon == nullptr || !is_valid_vector(direction) ||
+      !is_valid_vector(playerPosition) ||
       Battle::length_squared(direction) <= 0.0) {
     return false;
   }
+  player->position = playerPosition;
+  set_enemy_reports_locked(uid, enemyPositions);
 
   auto cooldownIt = nextAttackTickByUid.find(uid);
   if (cooldownIt != nextAttackTickByUid.end() &&
@@ -473,41 +564,6 @@ bool Room::shoot_battle_player(const std::string &uid,
   const auto attackDir = Battle::norm_or_zero(direction);
 
   nextAttackTickByUid[uid] = battleTick + cooldown_ticks_locked(*weapon);
-  if (weapon->projectileCount == 0) {
-    melee_attack_locked(*player, *weapon, attackDir);
-    return true;
-
-  } else {
-    for (int index = 0; index < weapon->projectileCount; ++index) {
-      Battle::BulletState bulletState;
-      auto &bullet = bulletState.entity;
-      bullet.entityId = nextBattleEntityId++;
-      bullet.entityType = Protocol::EntityType::PLAYER_BULLET;
-      const double startOffset = player_radius(battleConfig);
-      bullet.position =
-          BattleVector2{player->position.x + attackDir.x * startOffset,
-                        player->position.y + attackDir.y * startOffset};
-      bullet.type = Protocol::BattleBulletType::PLAYER_BULLET;
-      auto projectile = weapon->projectile;
-      if (projectile.speed <= 0.0) {
-        projectile.speed = battleConfig.bulletSpeed;
-      }
-      bullet.direction = BattleVector2{attackDir.x * projectile.speed,
-                                       attackDir.y * projectile.speed};
-      bulletState.sourceUid = player->uid;
-      bulletState.damage = weapon_damage_locked(*weapon);
-      bulletState.rangeLeft = battle_range(*weapon);
-      bullet.attribute = bullet_attribute(projectile);
-      bulletState.weapon = *weapon;
-      bulletState.remainingPierce =
-          projectile.canPierce ? projectile.pierceCount : 0;
-      bulletState.pierceDamageFactor = projectile.pierceDamageFactor;
-      battleBullets.push_back(bulletState);
-
-      push_event_locked(EventType::BULLET_SPAWN, SpawnParam(bullet));
-    }
-    return true;
-  }
-
-  return false;
+  pendingShots.push_back(PendingShot{uid, attackDir, playerPosition, *weapon});
+  return true;
 }
