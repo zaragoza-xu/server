@@ -20,6 +20,7 @@ $h = @{ Authorization = "Bearer $env:API_SYNC_TOKEN" }
 | POST | `/jobs/refresh-cache` | Body：`{"module":"战斗"}`；可选 `"force":true` 跳过 revision 比对 |
 | POST | `/jobs/api-compare` | Body：`module`、`repo`、`files`（**须含** `config/message_aliases.yaml`）；可选 `target`、`scoped` |
 | POST | `/jobs/api-doc-sync` | Body：`module`、`repo`、`summary`、`files_changed`、`docx_draft`、`target` |
+| POST | `/jobs/module-system-doc-sync` | Body：`module`、`repo`、`mode`、`files_changed`、`docx_draft`（creator profile 写模块系统设计 wiki） |
 | GET | `/api/status` | 各模块 `cached_at`、`fetched_at`、`api_docs`/`type_constraints` revision |
 
 ## 示例

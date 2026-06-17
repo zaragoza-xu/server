@@ -9,7 +9,7 @@ alwaysApply: true
 - 禁止在成员机器运行 `lark-cli`；通过环境变量 `API_SYNC_BASE`、`API_SYNC_TOKEN` 访问 ECS
 - 禁止新建 `Generated/` 或平行协议目录；只修改已有源文件
 - 对齐前确认当前 Git 分支；自行 review 后 commit，不自动开 PR、不自动切分支
-- 四种工作流（刷新缓存、对比、对齐、写回飞书草稿）见 Skill `/game-api-sync` 或 `.cursor/skills/game-api-sync/`
+- 五种工作流（刷新缓存、对比、对齐、写回协议草稿、**模块系统设计文档 CI**）见 Skill `/game-api-sync` 或 `.cursor/skills/game-api-sync/`
 - 对齐/对比/写回飞书前：先 `POST /jobs/refresh-cache` **当前模块**（默认 **revision 比对**，未变则跳过；用户要求强制刷新时 `"force":true`）
 - **对齐代码前 Glob 门禁**：待改协议文件不在 `module_map` glob 中时，Agent 自动更新 `wiki-registry.yaml`（仅协议源文件，勿加资源/UI/Editor/Tests）；**提醒用户核对 glob 后再改代码**（见 skill `references/registry-globs.md`）
 - 对比噪声：`config/message_aliases.yaml` 中英别名；server `server_glob` 宜显式路径列表，勿含共享 protocol.h 全量
