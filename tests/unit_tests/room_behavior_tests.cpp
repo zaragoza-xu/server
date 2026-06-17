@@ -519,8 +519,7 @@ TEST(RoomTest, BattleShootSpawnsNormalizedBullet) {
   const auto &spawn = *frame.events[spawnIndex].spawnParameter;
   ASSERT_TRUE(spawn.bulletEntity.has_value());
   EXPECT_EQ(spawn.entityId, spawn.bulletEntity->entityId);
-  EXPECT_DOUBLE_EQ(spawn.bulletEntity->position.x,
-                   harness.state->battleConfig.playerRadius);
+  EXPECT_DOUBLE_EQ(spawn.bulletEntity->position.x, 0.0);
   EXPECT_DOUBLE_EQ(spawn.bulletEntity->position.y, 0.0);
   EXPECT_DOUBLE_EQ(spawn.bulletEntity->direction.x, 1.0);
   EXPECT_DOUBLE_EQ(spawn.bulletEntity->direction.y, 0.0);
@@ -547,8 +546,7 @@ TEST(RoomTest, BattleRangedWeaponFallsBackWhenProjectileSpeedIsZero) {
   ASSERT_TRUE(spawn.bulletEntity.has_value());
   EXPECT_DOUBLE_EQ(spawn.bulletEntity->direction.x,
                    harness.state->battleConfig.bulletSpeed);
-  EXPECT_DOUBLE_EQ(spawn.bulletEntity->position.x,
-                   harness.state->battleConfig.playerRadius);
+  EXPECT_DOUBLE_EQ(spawn.bulletEntity->position.x, 0.0);
   EXPECT_DOUBLE_EQ(spawn.bulletEntity->attribute.speed,
                    harness.state->battleConfig.bulletSpeed);
 }
@@ -833,6 +831,37 @@ TEST(RoomTest, BattleBulletHitsEnemyMovementPath) {
   EXPECT_GE(find_damage_to(frame.events, Protocol::EntityType::ENEMY), 0);
 }
 
+TEST(RoomTest, BattleShootReportHitsCloseEnemyOnFirstTick) {
+  auto weapon = test_gun();
+  weapon.projectile.size = 0.05;
+  weapon.projectile.speed = 3.0;
+  auto enemyDef = test_enemy();
+  enemyDef.maxSpeed = 0.0;
+  auto harness = make_room_with_weapon(weapon, {enemyDef});
+  buy_and_select(*harness.room, harness.uid, "test_gun");
+  Protocol::BattleFrameRsp frame;
+  start_battle(*harness.room, harness.uid, frame);
+  const auto enemy = first_spawned_enemy(frame);
+  ASSERT_TRUE(enemy.has_value());
+
+  const Battle::BattleVector2 playerPos{enemy->position.x - 8.0,
+                                        enemy->position.y};
+  Protocol::BattlePos enemyReport;
+  enemyReport.entityId = enemy->entityId;
+  enemyReport.position = {playerPos.x + 0.7, playerPos.y};
+  enemyReport.direction = {1.0, 0.0};
+  ASSERT_GT(Battle::distance_squared(enemy->position, enemyReport.position),
+            20.0);
+
+  ASSERT_TRUE(
+      shoot(*harness.room, harness.uid, {1.0, 0.0}, playerPos, {enemyReport}));
+  ASSERT_TRUE(harness.room->tick_battle(frame));
+
+  EXPECT_GE(
+      find_event(frame.events, Protocol::BattleEventType::BULLET_HIT_ENEMY), 0);
+  EXPECT_GE(find_damage_to(frame.events, Protocol::EntityType::ENEMY), 0);
+}
+
 TEST(RoomTest, BattleBulletHitAllowsSyncDrift) {
   auto weapon = test_gun();
   weapon.projectile.size = 0.05;
@@ -948,25 +977,36 @@ TEST(RoomTest, BattleWavesKeepRunningAfterOneEnemyDies) {
   EXPECT_FALSE(ended);
 }
 
-TEST(RoomTest, EnemyReportsAreSpeedLimited) {
-  auto harness = make_room();
+TEST(RoomTest, EnemyReportsAreAccepted) {
+  auto weapon = test_gun();
+  weapon.projectile.size = 0.05;
+  weapon.projectile.speed = 3.0;
+  auto enemyDef = test_enemy();
+  enemyDef.maxSpeed = 0.0;
+  auto harness = make_room_with_weapon(weapon, {enemyDef});
+  buy_and_select(*harness.room, harness.uid, "test_gun");
   Protocol::BattleFrameRsp frame;
   start_battle(*harness.room, harness.uid, frame);
   const auto enemy = first_spawned_enemy(frame);
   ASSERT_TRUE(enemy.has_value());
 
+  const Battle::BattleVector2 playerPos{enemy->position.x - 8.0,
+                                        enemy->position.y};
   Protocol::BattlePos report;
   report.entityId = enemy->entityId;
-  report.position = {0.0, 0.0};
+  report.position = {playerPos.x + 0.7, playerPos.y};
   report.direction = dir_to(enemy->position, report.position);
-  ASSERT_TRUE(harness.room->sync_battle(harness.uid, {0.0, 0.0}, {report}));
-  ASSERT_TRUE(harness.room->tick_battle(frame));
-  EXPECT_EQ(find_event(frame.events, Protocol::BattleEventType::ENTITY_DAMAGE),
-            -1);
+  ASSERT_GT(Battle::distance_squared(enemy->position, report.position), 20.0);
 
-  const auto player = find_player(frame, harness.uid);
-  ASSERT_TRUE(player.has_value());
-  EXPECT_EQ(player->attribute.currentHP, player->attribute.maxHP);
+  ASSERT_TRUE(harness.room->sync_battle(harness.uid, playerPos, {report}));
+  ASSERT_TRUE(harness.room->tick_battle(frame));
+
+  ASSERT_TRUE(shoot(*harness.room, harness.uid, {1.0, 0.0}, playerPos));
+  ASSERT_TRUE(harness.room->tick_battle(frame));
+
+  EXPECT_GE(
+      find_event(frame.events, Protocol::BattleEventType::BULLET_HIT_ENEMY), 0);
+  EXPECT_GE(find_damage_to(frame.events, Protocol::EntityType::ENEMY), 0);
 }
 
 TEST(RoomTest, EnemyFallbackMovesWhenClientsDoNotReport) {

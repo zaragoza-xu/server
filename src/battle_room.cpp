@@ -75,6 +75,7 @@ void Room::reset_battle_state_locked() {
   enemyPosByUid.clear();
   nextAttackTickByUid.clear();
   battleBullets.clear();
+  pendingShots.clear();
   pendingBattleEvents.clear();
   for (const auto &uid : uids) {
     battleReadyStates[uid] = false;
@@ -178,8 +179,9 @@ bool Room::set_battle_ready(const std::string &uid,
 }
 
 void Room::apply_enemy_reports_locked() {
-  // Clients simulate enemy movement, but the server averages valid reports and
-  // still enforces speed before accepting them.
+  // Clients simulate enemy movement and collisions. Valid reports are accepted
+  // as the enemy position for this frame; no-report enemies use server
+  // fallback.
   for (auto &[enemyId, enemyState] : battleEnemyStates) {
     enemyState.lastPosition = enemyState.entity.position;
     double x = 0.0;
@@ -228,8 +230,7 @@ void Room::apply_enemy_reports_locked() {
 
     const auto oldPosition = enemyState.entity.position;
     const BattleVector2 target{x / count, y / count};
-    enemyState.entity.position =
-        step_to(oldPosition, target, enemy_step(enemyState));
+    enemyState.entity.position = target;
     const auto movement =
         Battle::norm_or_zero({enemyState.entity.position.x - oldPosition.x,
                               enemyState.entity.position.y - oldPosition.y});
@@ -240,6 +241,55 @@ void Room::apply_enemy_reports_locked() {
   }
 
   enemyPosByUid.clear();
+}
+
+void Room::fire_pending_locked() {
+  auto shots = std::move(pendingShots);
+  pendingShots.clear();
+
+  for (const auto &shot : shots) {
+    auto *player = live_player_locked(shot.uid);
+    if (player == nullptr || Battle::length_squared(shot.direction) <= 0.0 ||
+        !is_valid_vector(shot.direction) ||
+        !is_valid_vector(shot.playerPosition)) {
+      continue;
+    }
+
+    const auto attackDir = Battle::norm_or_zero(shot.direction);
+    if (shot.weapon.projectileCount == 0) {
+      const auto currentPosition = player->position;
+      player->position = shot.playerPosition;
+      melee_attack_locked(*player, shot.weapon, attackDir);
+      player->position = currentPosition;
+      continue;
+    }
+
+    for (int index = 0; index < shot.weapon.projectileCount; ++index) {
+      Battle::BulletState bulletState;
+      auto &bullet = bulletState.entity;
+      bullet.entityId = nextBattleEntityId++;
+      bullet.entityType = Protocol::EntityType::PLAYER_BULLET;
+      bullet.position = shot.playerPosition;
+      bullet.type = Protocol::BattleBulletType::PLAYER_BULLET;
+      auto projectile = shot.weapon.projectile;
+      if (projectile.speed <= 0.0) {
+        projectile.speed = battleConfig.bulletSpeed;
+      }
+      bullet.direction = BattleVector2{attackDir.x * projectile.speed,
+                                       attackDir.y * projectile.speed};
+      bulletState.sourceUid = player->uid;
+      bulletState.damage = weapon_damage_locked(shot.weapon);
+      bulletState.rangeLeft = battle_range(shot.weapon);
+      bullet.attribute = bullet_attribute(projectile);
+      bulletState.weapon = shot.weapon;
+      bulletState.remainingPierce =
+          projectile.canPierce ? projectile.pierceCount : 0;
+      bulletState.pierceDamageFactor = projectile.pierceDamageFactor;
+      battleBullets.push_back(bulletState);
+
+      push_event_locked(EventType::BULLET_SPAWN, SpawnParam(bullet));
+    }
+  }
 }
 
 void Room::tick_enemy_attacks_locked() {
@@ -322,9 +372,7 @@ void Room::tick_bullets_locked() {
     const double bulletRadius = bullet.attribute.size > 0.0
                                     ? bullet.attribute.size
                                     : battleConfig.bulletRadius;
-    const BattleVector2 prevPosition =
-        bulletState.checkedSpawnPath ? bullet.position : bulletState.spawnFrom;
-    bulletState.checkedSpawnPath = true;
+    const BattleVector2 prevPosition = bullet.position;
 
     bullet.position.x += bullet.direction.x;
     bullet.position.y += bullet.direction.y;
@@ -356,7 +404,6 @@ void Room::tick_bullets_locked() {
         enemyIt = it;
       }
     }
-
     if (enemyIt == battleEnemyStates.end()) {
       liveBullets.push_back(std::move(bulletState));
       continue;
@@ -417,6 +464,7 @@ bool Room::tick_battle(Protocol::BattleFrameRsp &frame, bool *ended) {
 
   if (!battleEnded) {
     apply_enemy_reports_locked();
+    fire_pending_locked();
     tick_bullets_locked();
     tick_spawn_locked();
 
@@ -518,42 +566,6 @@ bool Room::shoot_battle_player(
   const auto attackDir = Battle::norm_or_zero(direction);
 
   nextAttackTickByUid[uid] = battleTick + cooldown_ticks_locked(*weapon);
-  if (weapon->projectileCount == 0) {
-    melee_attack_locked(*player, *weapon, attackDir);
-    return true;
-
-  } else {
-    for (int index = 0; index < weapon->projectileCount; ++index) {
-      Battle::BulletState bulletState;
-      auto &bullet = bulletState.entity;
-      bullet.entityId = nextBattleEntityId++;
-      bullet.entityType = Protocol::EntityType::PLAYER_BULLET;
-      const double startOffset = player_radius(battleConfig);
-      bullet.position =
-          BattleVector2{player->position.x + attackDir.x * startOffset,
-                        player->position.y + attackDir.y * startOffset};
-      bullet.type = Protocol::BattleBulletType::PLAYER_BULLET;
-      auto projectile = weapon->projectile;
-      if (projectile.speed <= 0.0) {
-        projectile.speed = battleConfig.bulletSpeed;
-      }
-      bullet.direction = BattleVector2{attackDir.x * projectile.speed,
-                                       attackDir.y * projectile.speed};
-      bulletState.sourceUid = player->uid;
-      bulletState.spawnFrom = player->position;
-      bulletState.damage = weapon_damage_locked(*weapon);
-      bulletState.rangeLeft = battle_range(*weapon);
-      bullet.attribute = bullet_attribute(projectile);
-      bulletState.weapon = *weapon;
-      bulletState.remainingPierce =
-          projectile.canPierce ? projectile.pierceCount : 0;
-      bulletState.pierceDamageFactor = projectile.pierceDamageFactor;
-      battleBullets.push_back(bulletState);
-
-      push_event_locked(EventType::BULLET_SPAWN, SpawnParam(bullet));
-    }
-    return true;
-  }
-
-  return false;
+  pendingShots.push_back(PendingShot{uid, attackDir, playerPosition, *weapon});
+  return true;
 }

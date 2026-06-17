@@ -43,6 +43,13 @@ private:
   std::unordered_map<std::string, int> selectedMapNodeByUid;
 
   // battle info
+  struct PendingShot {
+    std::string uid;
+    Battle::BattleVector2 direction;
+    Battle::BattleVector2 playerPosition;
+    Battle::WeaponDef weapon;
+  };
+
   Battle::BattleConfig battleConfig = Battle::default_battle_config();
   std::unordered_map<std::string, bool> battleReadyStates;
   std::unordered_map<std::string, Protocol::BattlePlayerEntity>
@@ -53,6 +60,7 @@ private:
       enemyPosByUid;
   std::unordered_map<std::string, int> nextAttackTickByUid;
   std::vector<Battle::BulletState> battleBullets;
+  std::vector<PendingShot> pendingShots;
   std::vector<Protocol::BattleEventDTO> pendingBattleEvents;
   int battleTick = 0;
   int nextBattleEntityId = 1;
@@ -101,8 +109,7 @@ private:
   Battle::BattleVector2 step_to(const Battle::BattleVector2 &from,
                                 const Battle::BattleVector2 &to,
                                 double maxDistance) {
-    // Server-side movement is capped even when clients report a far-away
-    // target.
+    // Server fallback movement remains capped when no client reports an enemy.
     const Battle::BattleVector2 delta{to.x - from.x, to.y - from.y};
     const double distSquared = length_squared(delta);
     if (!std::isfinite(distSquared) || distSquared <= 0.0) {
@@ -165,6 +172,7 @@ private:
       const std::string &uid,
       const std::vector<Protocol::BattlePos> &enemyPositions);
   void apply_enemy_reports_locked();
+  void fire_pending_locked();
   void tick_bullets_locked();
   void tick_enemy_attacks_locked();
   void end_battle_locked(bool won);
@@ -200,10 +208,11 @@ public:
   bool sync_battle(const std::string &uid,
                    const Battle::BattleVector2 &playerPosition,
                    const std::vector<Protocol::BattlePos> &enemyPositions);
-  bool shoot_battle_player(
-      const std::string &uid, const Battle::BattleVector2 &direction,
-      const Battle::BattleVector2 &playerPosition,
-      const std::vector<Protocol::BattlePos> &enemyPositions);
+  bool
+  shoot_battle_player(const std::string &uid,
+                      const Battle::BattleVector2 &direction,
+                      const Battle::BattleVector2 &playerPosition,
+                      const std::vector<Protocol::BattlePos> &enemyPositions);
   bool tick_battle(Protocol::BattleFrameRsp &frame, bool *ended = nullptr);
 
   bool set_member_ready(const std::string &uid, bool ready);
