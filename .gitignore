@@ -4,6 +4,8 @@
 !.cursor/
 
 build/
+build-coverage/
+coverage-reports/
 log.*
 
 tests/stress_tests/output

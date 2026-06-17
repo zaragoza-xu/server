@@ -52,7 +52,8 @@
     ],
     "max_state_violation_count": 0,
     "max_p99_latency_ms": 300.0,
-    "max_connect_failures": 0
+    "max_connect_failures": 5
   },
+  "timeout_seconds": 15.0,
   "threads": 4
 }

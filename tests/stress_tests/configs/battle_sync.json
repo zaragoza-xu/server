@@ -1,0 +1,22 @@
+{
+  "name": "battle_sync",
+  "description": "Multi-room battle sync load after full phase setup.",
+  "targets": {
+    "auth": { "host": "127.0.0.1", "port": 8765 },
+    "lobby": { "host": "127.0.0.1", "port": 8766 },
+    "map": { "host": "127.0.0.1", "port": 8768 },
+    "battle": { "host": "127.0.0.1", "port": 8769 }
+  },
+  "mode": "persistent_battle",
+  "duration_seconds": 120,
+  "rooms": 4,
+  "players_per_room": 2,
+  "sync_interval_ms": 50,
+  "concurrency": 8,
+  "threads": 2,
+  "thresholds": {
+    "max_unexpected_error_rate": 0.05,
+    "max_p99_latency_ms": 500.0,
+    "max_connect_failures": 0
+  }
+}

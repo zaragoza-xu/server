@@ -1,0 +1,22 @@
+{
+  "name": "full_flow",
+  "description": "Auth -> Lobby -> Map -> Battle end-to-end flow stress.",
+  "targets": {
+    "auth": { "host": "127.0.0.1", "port": 8765 },
+    "lobby": { "host": "127.0.0.1", "port": 8766 },
+    "map": { "host": "127.0.0.1", "port": 8768 },
+    "battle": { "host": "127.0.0.1", "port": 8769 }
+  },
+  "mode": "full_flow",
+  "duration_seconds": 120,
+  "concurrency": 8,
+  "battle_sync_count": 3,
+  "sync_interval_ms": 50,
+  "threads": 2,
+  "thresholds": {
+    "max_unexpected_error_rate": 0.01,
+    "min_flow_success_rate": 0.80,
+    "max_p99_latency_ms": 800.0,
+    "max_connect_failures": 0
+  }
+}

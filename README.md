@@ -296,22 +296,18 @@ ctest --test-dir build/debug-tests -R "^collision_detection_tests::" --output-on
   - `tests/network_tests/map_network_tests.cpp`：`MAP_INIT` / `MAP_MOVE`（异步推送）
   - `tests/network_tests/battle_network_tests.cpp`：`LOBBY -> SHOP -> MAP -> PLAYER_READY` 后进入 `BATTLE_WAIT`/`BATTLE_FRAME`
 
-构建：
+构建与运行：
 
 ```bash
-cmake --preset release
-cmake --build --preset release --target unit_tests
+cmake --preset debug-tests
+cmake --build --preset debug-tests
+ctest --preset debug-tests -R "network_tests::"
 ```
 
-运行：
+也可显式指定构建目录过滤运行（binaryDir 为 build/）：
 
 ```bash
 ctest --test-dir build -R "network_tests::" --output-on-failure
-```
-
-也可按文件名单独跑（例如 Home）：
-
-```bash
 ctest --test-dir build -R "^home_network_tests::" --output-on-failure
 ```
 

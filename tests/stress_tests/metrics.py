@@ -4,7 +4,9 @@ import time
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
+
+from orchestrator.knee_detector import bottleneck_label
 
 
 CODE_BIT_FLAGS = [
@@ -316,9 +318,38 @@ def write_outputs(report: Dict, output_dir: Path) -> None:
         f"runtime_seconds: {report['runtime_seconds']:.2f}",
         "",
         "[执行器]",
+        f"mode(运行模式): {runner.get('mode', 'single')}",
         f"thread_count(线程数): {runner.get('thread_count', 1)}",
         f"total_concurrency(总并发): {runner.get('total_concurrency', req['total'])}",
         f"per_thread_concurrency(每线程并发): {runner.get('per_thread_concurrency', [])}",
+    ]
+    if runner.get("netem_rule"):
+        lines.append(f"netem_rule(网络规则): {runner['netem_rule']}")
+    if runner.get("output_tag"):
+        lines.append(f"output_tag(输出标签): {runner['output_tag']}")
+    if report.get("knee_analysis"):
+        ka = report["knee_analysis"]
+        lines.extend(
+            [
+                "",
+                "[压力点分析]",
+                f"recommended_safe_concurrency(推荐安全并发): {ka.get('recommended_safe_concurrency')}",
+                f"first_knee_concurrency(首个压力点并发): {ka.get('first_knee_concurrency')}",
+                f"bottleneck_type(瓶颈类型): {ka.get('bottleneck_type_zh', bottleneck_label(str(ka.get('bottleneck_type', ''))))}",
+                f"recovery_ok(降压恢复): {ka.get('recovery_ok')}",
+            ]
+        )
+        for knee in ka.get("knees", []):
+            reasons_zh = knee.get("reasons_zh") or [
+                bottleneck_label(r) for r in knee.get("reasons", [])
+            ]
+            lines.append(
+                f"  knee: concurrency={knee.get('concurrency')} "
+                f"reasons(原因)={reasons_zh} "
+                f"rps={knee.get('throughput_rps', 0):.2f} p99={knee.get('p99_ms', 0):.2f}ms"
+            )
+    lines.extend(
+        [
         "",
         "[吞吐与请求]",
         f"requests_total(总请求数): {req['total']}",
@@ -347,6 +378,7 @@ def write_outputs(report: Dict, output_dir: Path) -> None:
         "[场景质量]",
         f"custom_counters(场景自定义计数): {report.get('custom_counters', {})}",
     ]
+    )
     if "threshold_result" in report:
         threshold_result = report["threshold_result"]
         lines.append(f"threshold_passed(是否通过阈值门禁): {threshold_result.get('passed', True)}")
@@ -364,66 +396,312 @@ def write_outputs(report: Dict, output_dir: Path) -> None:
                     f"passed(是否通过)={c.get('passed')}"
                 )
     txt_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    _write_chart_files(report, output_dir)
+    _write_summary_html(report, output_dir)
+    if report.get("ramp_steps"):
+        _write_ramp_artifacts(report, output_dir)
 
 
-def _write_chart_files(report: Dict, output_dir: Path) -> None:
-    metrics = {
-        "throughput_rps": float(report["requests"]["throughput_rps"]),
-        "success_rate_pct": float(report["requests"]["success_rate"]) * 100.0,
-        "latency_p95_ms": float(report["latency_ms"]["p95"]),
-        "latency_p99_ms": float(report["latency_ms"]["p99"]),
-        "connect_failures": float(report["connection"]["connect_failures"]),
-    }
-
-    # Normalize values for a compact horizontal bar chart.
-    max_value = max(metrics.values()) if metrics else 1.0
-    if max_value <= 0:
-        max_value = 1.0
-
-    width = 880
-    row_h = 56
-    left = 250
-    chart_w = 560
-    height = 80 + row_h * len(metrics)
-
-    rows = []
-    labels = [
-        ("throughput_rps", "吞吐(req/s)"),
-        ("success_rate_pct", "成功率(%)"),
-        ("latency_p95_ms", "P95延迟(ms)"),
-        ("latency_p99_ms", "P99延迟(ms)"),
-        ("connect_failures", "建连失败次数"),
+def _summary_metric_items(report: Dict) -> List[tuple[str, str]]:
+    req = report["requests"]
+    lat = report["latency_ms"]
+    conn = report["connection"]
+    return [
+        ("吞吐（req/s）", f"{float(req['throughput_rps']):.2f}"),
+        ("成功率（%）", f"{float(req['success_rate']) * 100:.2f}"),
+        ("P50 延迟（ms）", f"{float(lat.get('p50', 0)):.2f}"),
+        ("P95 延迟（ms）", f"{float(lat.get('p95', 0)):.2f}"),
+        ("P99 延迟（ms）", f"{float(lat.get('p99', 0)):.2f}"),
+        ("总请求数", f"{int(req['total'])}"),
+        ("建连失败次数", f"{int(conn['connect_failures'])}"),
+        ("关闭连接失败次数", f"{int(conn['close_failures'])}"),
     ]
-    for i, (key, label) in enumerate(labels):
-        y = 40 + i * row_h
-        v = metrics[key]
-        bar_w = 0 if max_value == 0 else (v / max_value) * chart_w
-        rows.append(
-            f'<text x="20" y="{y+20}" font-size="14" fill="#333">{label}</text>'
-            f'<rect x="{left}" y="{y}" width="{chart_w}" height="24" fill="#eef2ff" rx="4"/>'
-            f'<rect x="{left}" y="{y}" width="{bar_w:.2f}" height="24" fill="#4f46e5" rx="4"/>'
-            f'<text x="{left + chart_w + 10}" y="{y+18}" font-size="14" fill="#111">{v:.2f}</text>'
-        )
 
-    svg = (
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}">'
-        f'<rect width="100%" height="100%" fill="#ffffff"/>'
-        f'<text x="20" y="24" font-size="18" fill="#111">压力测试关键指标图</text>'
-        + "".join(rows)
-        + "</svg>"
-    )
 
-    (output_dir / "charts.svg").write_text(svg, encoding="utf-8")
+def _summary_metrics_html(report: Dict) -> str:
+    items = _summary_metric_items(report)
+    rows = "\n".join(f"  <li>{label}：{value}</li>" for label, value in items)
+    return f"<ul>\n{rows}\n</ul>"
 
+
+def _write_summary_html(report: Dict, output_dir: Path) -> None:
     html = f"""<!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><title>Stress Charts</title></head>
+<head><meta charset="utf-8"><title>Stress Summary - {report["scenario"]}</title></head>
 <body>
-  <h2>压力测试关键指标图 - {report["scenario"]}</h2>
+  <h2>压力测试关键指标 - {report["scenario"]}</h2>
   <p>运行时长: {report["runtime_seconds"]:.2f}s</p>
-  <img src="charts.svg" alt="stress charts" />
+  {_summary_metrics_html(report)}
 </body>
 </html>
 """
     (output_dir / "charts.html").write_text(html, encoding="utf-8")
+
+
+def _write_ramp_artifacts(report: Dict, output_dir: Path) -> None:
+    steps = report.get("ramp_steps", [])
+    if not steps:
+        return
+
+    charts_dir = output_dir / "charts"
+    charts_dir.mkdir(exist_ok=True)
+
+    csv_lines = [
+        "step_index,phase,concurrency,hold_seconds,elapsed_start_s,elapsed_end_s,elapsed_mid_s,"
+        "throughput_rps,p50_ms,p95_ms,p99_ms,success_rate,connect_failures,unexpected_error_rate"
+    ]
+    ts_lines = [
+        "elapsed_s,phase,concurrency,throughput_rps,p95_ms,p99_ms,success_rate_pct,connect_failures"
+    ]
+    for i, step in enumerate(steps):
+        req = step.get("requests", {})
+        lat = step.get("latency_ms", {})
+        conn = step.get("connection", {})
+        split = _split_error_codes_by_expectation(step.get("error_codes", {}))
+        total = int(req.get("total", 0))
+        unexpected = sum(int(v) for v in split["unexpected"].values())
+        uerr = (unexpected / total) if total else 0.0
+        t_mid = float(step.get("elapsed_mid_s", 0))
+        t_end = float(step.get("elapsed_end_s", t_mid))
+        csv_lines.append(
+            f"{i},{step.get('phase','')},{step.get('concurrency',0)},{step.get('hold_seconds',0)},"
+            f"{step.get('elapsed_start_s',0):.2f},{step.get('elapsed_end_s',0):.2f},{t_mid:.2f},"
+            f"{req.get('throughput_rps',0):.4f},{lat.get('p50',0):.2f},{lat.get('p95',0):.2f},"
+            f"{lat.get('p99',0):.2f},{req.get('success_rate',0):.4f},"
+            f"{conn.get('connect_failures',0)},{uerr:.6f}"
+        )
+        ts_lines.append(
+            f"{t_end:.2f},{step.get('phase','')},{step.get('concurrency',0)},"
+            f"{req.get('throughput_rps',0):.4f},{lat.get('p95',0):.2f},{lat.get('p99',0):.2f},"
+            f"{float(req.get('success_rate',0)) * 100:.4f},{conn.get('connect_failures',0)}"
+        )
+    (output_dir / "steps.csv").write_text("\n".join(csv_lines) + "\n", encoding="utf-8")
+    (output_dir / "timeseries.csv").write_text("\n".join(ts_lines) + "\n", encoding="utf-8")
+
+    ka = report.get("knee_analysis", {})
+    knee_times: set = set()
+    knee_conc = set()
+    if ka.get("first_knee_concurrency") is not None:
+        knee_conc.add(int(ka["first_knee_concurrency"]))
+    for knee in ka.get("knees", []):
+        knee_conc.add(int(knee.get("concurrency", 0)))
+    for step in steps:
+        if int(step.get("concurrency", 0)) in knee_conc:
+            knee_times.add(float(step.get("elapsed_end_s", 0)))
+
+    times = [float(s.get("elapsed_end_s", s.get("elapsed_mid_s", 0))) for s in steps]
+    rps_vals = [float(s.get("requests", {}).get("throughput_rps", 0)) for s in steps]
+    p95_vals = [float(s.get("latency_ms", {}).get("p95", 0)) for s in steps]
+    p99_vals = [float(s.get("latency_ms", {}).get("p99", 0)) for s in steps]
+    success_vals = [float(s.get("requests", {}).get("success_rate", 0)) * 100.0 for s in steps]
+
+    _write_combined_time_series_svg(
+        charts_dir / "timeseries_combined.svg",
+        times,
+        [
+            ("吞吐 (RPS)", rps_vals, "#4f46e5"),
+            ("P95 延迟 (ms)", p95_vals, "#ea580c"),
+            ("P99 延迟 (ms)", p99_vals, "#dc2626"),
+            ("成功率 (%)", success_vals, "#059669"),
+        ],
+        knee_times,
+    )
+
+    report_html = output_dir / "report.html"
+    knee_section = ""
+    if ka:
+        bn_zh = ka.get("bottleneck_type_zh", bottleneck_label(str(ka.get("bottleneck_type", ""))))
+        knee_section = f"""
+<h3>压力点分析</h3>
+<ul>
+  <li>推荐安全并发: {ka.get('recommended_safe_concurrency')}</li>
+  <li>首个压力点: {ka.get('first_knee_concurrency')}</li>
+  <li>瓶颈类型: {bn_zh}</li>
+  <li>降压恢复: {'是' if ka.get('recovery_ok') else '否'}</li>
+</ul>"""
+    netem = report.get("runner", {}).get("netem_rule", "(none)")
+    report_html.write_text(
+        f"""<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>Stress Report - {report['scenario']}</title></head>
+<body>
+  <h1>压测报告: {report['scenario']}</h1>
+  <p>运行时长: {report['runtime_seconds']:.2f}s | 模式: {report.get('runner', {}).get('mode', 'single')} | 网络: {netem}</p>
+  {knee_section}
+  <h3>时间序列折线图（横轴: 运行时间 s）</h3>
+  <p>纵轴为各指标相对本 run 峰值的归一化百分比 (0–100%)，便于同图对比趋势；图例标注原始指标名称。</p>
+  <img src="charts/timeseries_combined.svg" alt="combined timeseries" />
+  <h3>关键指标汇总</h3>
+  {_summary_metrics_html(report)}
+  <h3>阶梯数据</h3>
+  <pre>{chr(10).join(csv_lines)}</pre>
+</body>
+</html>""",
+        encoding="utf-8",
+    )
+
+
+def _normalize_series(values: List[float]) -> List[float]:
+    peak = max(values) if values else 0.0
+    if peak <= 0:
+        return [0.0 for _ in values]
+    return [v / peak * 100.0 for v in values]
+
+
+def _write_combined_time_series_svg(
+    path: Path,
+    times: List[float],
+    series: List[tuple],
+    knee_times: set,
+) -> None:
+    """Draw multiple normalized (0-100%) lines on one chart with legend."""
+    if not times or not series:
+        return
+    width, height = 860, 480
+    pad_l, pad_b, pad_t, pad_r = 80, 55, 70, 40
+    plot_w = width - pad_l - pad_r
+    plot_h = height - pad_t - pad_b
+    max_t = max(times) if times else 1.0
+    if max_t <= 0:
+        max_t = 1.0
+
+    def px(t: float) -> float:
+        return pad_l + (t / max_t) * plot_w
+
+    def py_pct(pct: float) -> float:
+        return pad_t + plot_h - (pct / 100.0) * plot_h
+
+    lines_svg = ""
+    legend_svg = ""
+    for i, (label, values, color) in enumerate(series):
+        norm = _normalize_series(values)
+        points = " ".join(f"{px(t):.1f},{py_pct(v):.1f}" for t, v in zip(times, norm))
+        lines_svg += f'<polyline fill="none" stroke="{color}" stroke-width="2" points="{points}"/>'
+        for t, v in zip(times, norm):
+            lines_svg += f'<circle cx="{px(t):.1f}" cy="{py_pct(v):.1f}" r="3" fill="{color}"/>'
+        lx = pad_l + i * 200
+        ly = 28
+        legend_svg += (
+            f'<line x1="{lx}" y1="{ly}" x2="{lx + 24}" y2="{ly}" stroke="{color}" stroke-width="3"/>'
+            f'<text x="{lx + 30}" y="{ly + 4}" font-size="12" fill="#333">{label}</text>'
+        )
+
+    knee_lines = ""
+    for kt in sorted(knee_times):
+        if kt <= 0:
+            continue
+        x = px(kt)
+        knee_lines += (
+            f'<line x1="{x:.1f}" y1="{pad_t}" x2="{x:.1f}" y2="{pad_t + plot_h}" '
+            f'stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4,3"/>'
+        )
+
+    x_ticks = ""
+    for frac in (0.0, 0.25, 0.5, 0.75, 1.0):
+        tv = max_t * frac
+        x = px(tv)
+        x_ticks += (
+            f'<line x1="{x:.1f}" y1="{pad_t + plot_h}" x2="{x:.1f}" y2="{pad_t + plot_h + 4}" stroke="#999"/>'
+            f'<text x="{x:.1f}" y="{pad_t + plot_h + 18}" font-size="11" fill="#666" text-anchor="middle">{tv:.0f}s</text>'
+        )
+
+    y_ticks = ""
+    for pct in (0, 25, 50, 75, 100):
+        y = py_pct(float(pct))
+        y_ticks += (
+            f'<line x1="{pad_l - 4}" y1="{y:.1f}" x2="{pad_l}" y2="{y:.1f}" stroke="#999"/>'
+            f'<text x="{pad_l - 8}" y="{y + 4:.1f}" font-size="11" fill="#666" text-anchor="end">{pct}%</text>'
+        )
+
+    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}">
+  <rect width="100%" height="100%" fill="#fff"/>
+  <text x="{pad_l}" y="52" font-size="15" fill="#111">压力指标 vs 运行时间（归一化）</text>
+  {legend_svg}
+  <line x1="{pad_l}" y1="{pad_t + plot_h}" x2="{pad_l + plot_w}" y2="{pad_t + plot_h}" stroke="#ccc"/>
+  <line x1="{pad_l}" y1="{pad_t}" x2="{pad_l}" y2="{pad_t + plot_h}" stroke="#ccc"/>
+  {x_ticks}{y_ticks}{knee_lines}
+  {lines_svg}
+  <text x="{pad_l + plot_w / 2:.0f}" y="{height - 12}" font-size="12" fill="#444" text-anchor="middle">运行时间 (s)</text>
+  <text x="16" y="{pad_t + plot_h / 2:.0f}" font-size="12" fill="#444" transform="rotate(-90 16 {pad_t + plot_h / 2:.0f})" text-anchor="middle">归一化 (%)</text>
+  <line x1="{pad_l + plot_w - 120}" y1="{pad_t + 12}" x2="{pad_l + plot_w - 100}" y2="{pad_t + 12}" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <text x="{pad_l + plot_w - 95}" y="{pad_t + 16}" font-size="10" fill="#666">压力点</text>
+</svg>"""
+    path.write_text(svg, encoding="utf-8")
+
+
+def _write_time_series_svg(
+    path: Path,
+    title: str,
+    times: List[float],
+    values: List[float],
+    knee_times: set,
+    y_unit: str,
+    color: str,
+    y_max: Optional[float] = None,
+) -> None:
+    if not times or not values:
+        return
+    width, height = 720, 360
+    pad_l, pad_b, pad_t, pad_r = 70, 50, 40, 30
+    plot_w = width - pad_l - pad_r
+    plot_h = height - pad_t - pad_b
+    max_t = max(times) if times else 1.0
+    if max_t <= 0:
+        max_t = 1.0
+    max_y = y_max if y_max is not None else max(values)
+    if max_y <= 0:
+        max_y = 1.0
+
+    def px(t: float) -> float:
+        return pad_l + (t / max_t) * plot_w
+
+    def py(v: float) -> float:
+        return pad_t + plot_h - (v / max_y) * plot_h
+
+    points = " ".join(f"{px(t):.1f},{py(v):.1f}" for t, v in zip(times, values))
+    circles = []
+    for t, v in zip(times, values):
+        fill = "#f59e0b" if t in knee_times else color
+        r = 7 if t in knee_times else 4
+        circles.append(f'<circle cx="{px(t):.1f}" cy="{py(v):.1f}" r="{r}" fill="{fill}"/>')
+
+    knee_lines = ""
+    for kt in sorted(knee_times):
+        if kt <= 0:
+            continue
+        x = px(kt)
+        knee_lines += (
+            f'<line x1="{x:.1f}" y1="{pad_t}" x2="{x:.1f}" y2="{pad_t + plot_h}" '
+            f'stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4,3"/>'
+        )
+
+    # X-axis ticks (0, 25%, 50%, 75%, 100% of runtime)
+    x_ticks = ""
+    for frac in (0.0, 0.25, 0.5, 0.75, 1.0):
+        tv = max_t * frac
+        x = px(tv)
+        x_ticks += (
+            f'<line x1="{x:.1f}" y1="{pad_t + plot_h}" x2="{x:.1f}" y2="{pad_t + plot_h + 4}" stroke="#999"/>'
+            f'<text x="{x:.1f}" y="{pad_t + plot_h + 18}" font-size="11" fill="#666" text-anchor="middle">{tv:.0f}s</text>'
+        )
+
+    y_ticks = ""
+    for frac in (0.0, 0.5, 1.0):
+        yv = max_y * frac
+        y = py(yv)
+        y_ticks += (
+            f'<line x1="{pad_l - 4}" y1="{y:.1f}" x2="{pad_l}" y2="{y:.1f}" stroke="#999"/>'
+            f'<text x="{pad_l - 8}" y="{y + 4:.1f}" font-size="11" fill="#666" text-anchor="end">{yv:.1f}</text>'
+        )
+
+    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}">
+  <rect width="100%" height="100%" fill="#fff"/>
+  <text x="{pad_l}" y="24" font-size="15" fill="#111">{title}</text>
+  <text x="{width - pad_r}" y="24" font-size="11" fill="#666" text-anchor="end">纵轴: {y_unit}</text>
+  <line x1="{pad_l}" y1="{pad_t + plot_h}" x2="{pad_l + plot_w}" y2="{pad_t + plot_h}" stroke="#ccc"/>
+  <line x1="{pad_l}" y1="{pad_t}" x2="{pad_l}" y2="{pad_t + plot_h}" stroke="#ccc"/>
+  {x_ticks}{y_ticks}{knee_lines}
+  <polyline fill="none" stroke="{color}" stroke-width="2" points="{points}"/>
+  {''.join(circles)}
+  <text x="{pad_l + plot_w / 2:.0f}" y="{height - 8}" font-size="12" fill="#444" text-anchor="middle">运行时间 (s)</text>
+</svg>"""
+    path.write_text(svg, encoding="utf-8")
