@@ -24,7 +24,7 @@
 - 大厅域：`CREATE_ROOM`、`JOIN_ROOM`、`LEAVE_ROOM`、`LIST_ROOMS`
 - 商店域：`SHOP_INIT`、`SHOP_MOVE_CURSOR`、`SHOP_BUY`
 - 地图域：`MAP_INIT`、`MAP_MOVE`
-- 战斗域：`PLAYER_READY`、`BATTLE_SYNC`、`PLAYER_SHOOT`
+- 战斗域：`PLAYER_READY`、`POSITION_SYNC`、`PLAYER_SHOOT`
 
 ### 1.2 快照断言（每个命令都要有）
 
@@ -138,9 +138,9 @@
 - `PLAYER_READY` 只有在 `MAP` 阶段且已提交当前地图节点后才成功。
 - `PLAYER_READY` 未全员就绪时广播 `BATTLE_WAIT`。
 - 全员就绪时首个广播应为 `BATTLE_FRAME`，且 `pushMessages` 含 `BATTLE_START`。
-- `BATTLE_SYNC` 上报玩家位置和怪物位置；`BATTLE_FRAME` 只同步玩家实体和事件，不包含每帧怪物/子弹实体列表。
-- `PLAYER_SHOOT` 生成玩家子弹和 `BULLET_SPAWN`；后续 tick 推进子弹，命中墙/敌人时产生 hit、damage、destroy 事件。
-- 非 `BATTLE` 阶段调用 `BATTLE_SYNC` / `PLAYER_SHOOT` 应返回 `ROOM_STATE_ERROR`。
+- `POSITION_SYNC` 上报玩家位置和怪物位置；`BATTLE_FRAME` 只同步玩家实体和事件，不包含每帧怪物/子弹实体列表。
+- `PLAYER_SHOOT` 记录射击输入；后续 tick 生成玩家子弹或结算近战，产生 spawn/hit/damage/destroy 事件。
+- 非 `BATTLE` 阶段调用 `POSITION_SYNC` / `PLAYER_SHOOT` 应返回 `ROOM_STATE_ERROR`。
 - 战斗结束帧应带 `BATTLE_END`。
 - 敌人全部死亡后，若当前地图节点还有后继，下一次 `tick_battle()` 应失败且 `MAP_MOVE` 可继续。
 - 玩家全灭后，下一次 `tick_battle()` 应失败，并且房间进入结束态。

@@ -6,6 +6,7 @@
 build/
 build-coverage/
 coverage-reports/
+dist/
 log.*
 
 tests/stress_tests/output

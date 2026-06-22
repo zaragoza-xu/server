@@ -1,4 +1,4 @@
-# 项目结构与接口设计
+# 架构设计
 
 本文档描述当前代码实现的真实架构、运行时关系与协议约束。
 
@@ -11,6 +11,14 @@
 - `Channel` 负责连接读写与消息分帧
 - `Room` 是房间维度的聚合根，内部承载商店、地图、战斗状态和阶段状态机
 - `BattleServer` 通过固定 tick 循环驱动战斗帧广播
+
+默认端口配置：
+
+- `authPort = 22222`
+- `lobbyPort = 22223`
+- `shopPort = 22224`
+- `mapPort = 22225`
+- `battlePort = 22226`
 
 启动路径：
 
@@ -108,8 +116,8 @@ classDiagram
         +get_map_init(rsp)
         +move_map(uid, selectId, selectStatus, committed)
         +set_battle_ready(uid, rsp, allReady)
-        +sync_battle(uid, playerPosition, playerDirection, enemyPositions)
-        +shoot_battle_player(uid, direction)
+        +sync_battle(uid, playerPosition, enemyPositions)
+        +shoot_battle_player(uid, direction, playerPosition, enemyPositions)
         +tick_battle(frame)
     }
 
@@ -234,7 +242,7 @@ classDiagram
    - 全员提交同一个合法地图节点后，才允许 `PLAYER_READY`
    - 全员 battle ready 后进入 `BATTLE`
 4. `BATTLE`
-   - 允许 `BATTLE_SYNC`、`PLAYER_SHOOT`、`tick_battle()`
+   - 允许 `POSITION_SYNC`、`PLAYER_SHOOT`、`tick_battle()`
    - 非战斗入口返回 `ROOM_STATE_ERROR`
    - 胜利且当前地图节点仍有后继时回到 `MAP`
    - 失败或最后节点胜利时进入 `END`
@@ -300,21 +308,22 @@ classDiagram
   - 广播 `BATTLE_FRAME`
   - `pushMessages = [BATTLE_START]`
 
-`BATTLE_SYNC` 行为：
+`POSITION_SYNC` 行为：
 
-- 请求上报客户端实际玩家位置、玩家方向和本地计算出的怪物位置
+- 请求上报客户端实际玩家位置和本地计算出的怪物位置
 - 玩家位置以最新合法上报为准
 - 怪物位置在 `Room::tick_battle()` 中按实体聚合，各客户端同一 tick 内最新上报取均值
 - `BATTLE_FRAME` 不再每帧同步怪物/子弹实体列表；怪物和子弹出生、命中、销毁通过事件广播
 - 未知怪物或非有限坐标会被忽略
-- 非 `BATTLE` 阶段的 `BATTLE_SYNC` 会失败
+- 非 `BATTLE` 阶段的 `POSITION_SYNC` 会失败
 
 `PLAYER_SHOOT` 行为：
 
 - 校验战斗已开始、玩家存在、射击方向有限且非零
-- 服务端归一化射击方向，立刻创建玩家子弹实体和 `BULLET_SPAWN` 事件
+- 记录本次射击的方向、玩家位置和怪物位置报告
+- 下一次 tick 中，`fire_pending_locked()` 会按武器类型生成玩家子弹并广播 `BULLET_SPAWN`，或结算近战并广播 `WEAPON_HIT_ENEMY`
 - 子弹在 tick 中按固定速度推进
-- 子弹越过战斗边界时产生 `BULLET_HIT_WALL` 和子弹 `ENTITY_DESTROY`
+- 子弹射程耗尽时产生子弹 `ENTITY_DESTROY`，销毁原因为 `BULLET_TIMEOUT`
 - 子弹命中敌人时依次产生 `BULLET_HIT_ENEMY`、`ENTITY_DAMAGE` 和子弹 `ENTITY_DESTROY`
 - 敌人 HP 归零时追加敌人 `ENTITY_DESTROY`，并从后续帧中移除
 
@@ -380,6 +389,8 @@ classDiagram
 - 非 `main.cpp` 业务源码会先编译为 `server_core`，再由 `server` 和测试目标共同链接复用
 - `server_core` 使用预编译头缓存 `asio.hpp`、`nlohmann/json.hpp` 与常用 STL 头
 - 测试目标复用 `server_core` 的 PCH，降低重复编译成本
+- `install()` 规则会把 `server` 安装到 `bin/`，并把运行配置安装到 `config/`
+- `scripts/package-release.sh` 基于 release 构建和 install 规则生成 `dist/*.tar.gz` 产物包
 
 测试现状：
 
@@ -402,7 +413,7 @@ ctest --preset debug-tests
 ## 8. 维护约定
 
 - 任何协议字段、枚举值、push 语义变更，都必须同步更新：
-  - `README.md`
+  - `docs/PROTOCOL.md`
   - `docs/ARCHITECTURE.md`
   - `docs/TESTING_CHECKLIST.md`
   - 相关测试

@@ -1,7 +1,7 @@
 {
-  "authPort": 8765,
-  "lobbyPort": 8766,
-  "shopPort": 8767,
-  "mapPort": 8768,
-  "battlePort": 8769
+  "authPort": 22222,
+  "lobbyPort": 22223,
+  "shopPort": 22224,
+  "mapPort": 22225,
+  "battlePort": 22226
 }

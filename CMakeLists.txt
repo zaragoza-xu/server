@@ -21,6 +21,7 @@ endif()
 include(FetchContent)
 
 option(SERVER_FETCH_DEPS "Automatically download missing third-party dependencies" ON)
+include(GNUInstallDirs)
 
 file(GLOB SRC_LIST CONFIGURE_DEPENDS "src/*.cpp")
 set(SERVER_CORE_SRC_LIST ${SRC_LIST})
@@ -80,6 +81,16 @@ target_include_directories(collision PUBLIC "${PROJECT_SOURCE_DIR}/demos")
 
 add_executable(server src/main.cpp)
 target_link_libraries(server PRIVATE server_core)
+
+install(TARGETS server
+	RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+)
+install(FILES
+	config/server.json
+	config/shop_catalog.json
+	config/battle_config.json
+	DESTINATION config
+)
 
 add_executable(collision_demo
 	demos/collision_demo.cpp

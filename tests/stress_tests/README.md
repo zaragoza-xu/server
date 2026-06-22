@@ -4,7 +4,8 @@
 
 - Python 3.10+
 - Bash
-- 已启动的服务端（五端口 8765–8769），或 Docker Compose 隔离环境
+- 已启动的服务端，端口需与压测配置一致；仓库主配置 `config/server.json` 当前使用 `22222–22226`
+- `configs/*.json` 可以覆盖目标端口；运行本机服务前先确认场景配置与 `config/server.json` 一致
 - 可选：`tc` + `netem`（网络注入，需 root/CAP_NET_ADMIN）
 
 ## 关键文件
